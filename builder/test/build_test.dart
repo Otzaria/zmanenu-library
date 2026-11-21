@@ -73,7 +73,7 @@ void main() {
             r['key']: r['value'],
         };
         expect(meta['library_id'], 'otzaria.zmanenu');
-        expect(meta['library_folder'], 'מחברי זמנינו');
+        expect(meta['library_folder'], 'מחברי זמננו');
         expect(meta['db_version'], '1');
         for (final table in [
           'book',

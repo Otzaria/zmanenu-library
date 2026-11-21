@@ -1,4 +1,4 @@
-// בונה את מסד "מחברי זמנינו" מעץ המקור.
+// בונה את מסד "מחברי זמננו" מעץ המקור.
 //
 //   dart run bin/zmanenu.dart build --source <dir> --out <dir> --db-version <n>
 //       [--library <library.json>] [--previous-db <old.db>]

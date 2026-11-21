@@ -1,10 +1,10 @@
 {
   "library_id": "otzaria.zmanenu",
-  "library_name": "מחברי זמנינו",
-  "library_folder": "מחברי זמנינו",
+  "library_name": "מחברי זמננו",
+  "library_folder": "מחברי זמננו",
   "update_manifest_url": "https://github.com/Otzaria/zmanenu-library/releases/latest/download/manifest.json",
   "update_public_key": "SSCyhGfqGpA2/QY4Abl4t7a7ES9coCEPE9+o7RwTrl0=",
-  "description": "ספרי מחברי זמנינו — מסד אישי רשמי של אוצריא",
+  "description": "ספרי מחברי זמננו — מסד אישי רשמי של אוצריא",
   "author": "אוצריא",
   "default_generation": "מחברי זמננו",
   "db_file_name": "zmanenu.db",

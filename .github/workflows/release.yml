@@ -147,7 +147,7 @@ jobs:
           tag="v$version"
           # Draft first: "latest" moves only after every asset is uploaded.
           gh release create "$tag" --repo "${{ github.repository }}" --draft \
-            --target "${{ github.sha }}" --title "מחברי זמנינו $tag" \
+            --target "${{ github.sha }}" --title "מחברי זמננו $tag" \
             --notes-file "$RUNNER_TEMP/notes.txt" "$RUNNER_TEMP"/release/*
           gh release edit "$tag" --repo "${{ github.repository }}" --draft=false --latest
           echo "Published $tag: https://github.com/${{ github.repository }}/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"

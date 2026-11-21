@@ -1,5 +1,5 @@
 name: zmanenu_builder
-description: Builds the "מחברי זמנינו" personal Otzaria database from its editable source tree.
+description: Builds the "מחברי זמננו" personal Otzaria database from its editable source tree.
 publish_to: none
 version: 1.0.0
 
