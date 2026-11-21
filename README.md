@@ -86,3 +86,9 @@ Actions ← **Release** ← Run workflow. הפרמטרים: הערות גרסה,
 2. הכניסו ספרים ל-`source/`.
 3. הגדירו את הסוד `ZMANENU_SIGNING_KEY` ([`docs/release.md`](docs/release.md#הגדרת-הסוד)).
 4. הריצו Release.
+
+## רישיון
+
+אותו רישיון כמו של ספריית אוצריא הרשמית ([`Otzaria/otzaria-library`](https://github.com/Otzaria/otzaria-library)),
+ראו [`LICENSE`](LICENSE). כמו שם, הוא חל על העבודה המקורית של פרויקט אוצריא בריפו, והספרים עצמם כפופים לתנאים
+שקבעו בעלי הזכויות בהם.
