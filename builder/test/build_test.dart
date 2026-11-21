@@ -333,6 +333,28 @@ void main() {
     expect(run(source).source.books, hasLength(2));
   });
 
+  test('names that Windows does not allow', () {
+    expect(windowsNameProblem('תנ״ך'), isNull);
+    expect(windowsNameProblem('ספר א.txt'), isNull);
+    expect(windowsNameProblem('תנ"ך'), contains('״'));
+    for (final bad in [
+      'א:ב',
+      'מה?',
+      'כוכב*',
+      'א<ב',
+      'א>ב',
+      'א|ב',
+      'ספר.',
+      'ספר ',
+      'CON',
+      'con.txt',
+      'Lpt1.json',
+      'nul .txt',
+    ]) {
+      expect(windowsNameProblem(bad), isNotNull, reason: bad);
+    }
+  });
+
   group('text helpers', () {
     test('visible characters skip tags and count an entity once', () {
       expect(countVisibleChars('<b>אב</b>&amp;ג'), 4);

@@ -14,6 +14,33 @@ bool isIgnoredSystemFile(String name) {
   return lower == 'desktop.ini' || lower == 'thumbs.db';
 }
 
+final RegExp _windowsReserved = RegExp(
+  r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])$',
+  caseSensitive: false,
+);
+
+/// Why [name] cannot be a file or folder name on Windows, or null when it can.
+/// Editors work on Windows, so a name that only Linux accepts is an error.
+String? windowsNameProblem(String name) {
+  for (final rune in name.runes) {
+    if (rune < 0x20) return 'תו בקרה בשם';
+    final c = String.fromCharCode(rune);
+    if (r'<>:"/\|?*'.contains(c)) {
+      return c == '"'
+          ? 'התו " אסור ב-Windows; כתבו ״ (גרשיים עבריים)'
+          : 'התו $c אסור ב-Windows';
+    }
+  }
+  if (name.endsWith('.') || name.endsWith(' ')) {
+    return 'שם שמסתיים בנקודה או ברווח אסור ב-Windows';
+  }
+  final stem = name.split('.').first.trimRight();
+  if (_windowsReserved.hasMatch(stem)) {
+    return '"$stem" הוא שם שמור ב-Windows';
+  }
+  return null;
+}
+
 /// Extensions of the text files the source tree may hold. Anything else
 /// (PDF, DOCX, images...) is an error: the database holds text books only.
 const Set<String> kTextExtensions = {'txt', 'json', 'csv', 'md'};
@@ -96,6 +123,7 @@ class _Reader {
       issues.error('books/', 'התיקייה חסרה.');
       return;
     }
+    _checkNames(Directory(root));
     _walk(booksDir, const []);
     _scanOtherFiles(Directory(root));
     _readCategoriesJson();
@@ -108,6 +136,15 @@ class _Reader {
     _readDefaults('default_targumim.json', 'targumim', false);
   }
 
+  void _checkNames(Directory dir) {
+    for (final entity in dir.listSync()) {
+      final name = p.basename(entity.path);
+      final problem = windowsNameProblem(name);
+      if (problem != null) issues.error(_rel(entity.path), '$problem.');
+      if (entity is Directory && !name.startsWith('.')) _checkNames(entity);
+    }
+  }
+
   // ---- books/ ------------------------------------------------------------
 
   void _walk(Directory dir, List<String> path) {
@@ -118,8 +155,8 @@ class _Reader {
       if (name.startsWith('.') || isIgnoredSystemFile(name)) continue;
       if (entity is Directory) {
         final childPath = [...path, name.trim()];
-        if (name.trim() != name || name.trim().isEmpty) {
-          issues.error(_rel(entity.path), 'שם תיקייה עם רווח בהתחלה או בסוף.');
+        if (name.trimLeft() != name || name.trim().isEmpty) {
+          issues.error(_rel(entity.path), 'שם תיקייה עם רווח בהתחלה.');
         }
         final node = CategoryNode(childPath);
         _categories[node.key] = node;
