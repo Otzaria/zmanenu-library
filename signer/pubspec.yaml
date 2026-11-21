@@ -1,0 +1,12 @@
+name: zmanenu_signer
+description: Signs the update manifest of the "מחברי זמננו" database (ed25519). Kept apart from the app and the builder, so the signing key never meets their dependencies.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+# Exact version, the same as the app's lockfile: the signature format must match
+# AttachedUpdateSignature (lib/attached_libraries/repository/update/).
+dependencies:
+  pinenacl: 0.6.0
