@@ -1,0 +1,56 @@
+# בנייה ואימות בלי פרסום: לכל push ו-PR, וגם ידנית.
+name: Check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      otzaria_ref:
+        description: Otzaria/otzaria ref for the tools (empty = otzaria-tools.ref)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - id: tools
+        uses: ./.github/actions/setup-tools
+        with:
+          otzaria-ref: ${{ inputs.otzaria_ref }}
+
+      - name: Builder tests
+        working-directory: builder
+        run: |
+          dart analyze --fatal-infos
+          dart test
+
+      - name: Build the library and the examples
+        run: |
+          cd builder
+          dart run bin/zmanenu.dart build --source ../source --library ../library.json \
+            --out "$RUNNER_TEMP/library" --db-version 1
+          if [ -d ../examples ]; then
+            dart run bin/zmanenu.dart build --source ../examples --library ../library.json \
+              --out "$RUNNER_TEMP/examples" --db-version 1
+          fi
+
+      - name: Validate with the Otzaria validator
+        env:
+          OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
+        run: |
+          db="$(python3 -c 'import json; print(json.load(open("library.json"))["db_file_name"])')"
+          dbs=("$RUNNER_TEMP/library/$db")
+          [ -f "$RUNNER_TEMP/examples/$db" ] && dbs+=("$RUNNER_TEMP/examples/$db")
+          bash scripts/otzaria-tools.sh validate "${dbs[@]}"

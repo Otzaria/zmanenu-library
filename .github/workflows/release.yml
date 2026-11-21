@@ -1,0 +1,153 @@
+# הוצאת גרסה: בנייה, אימות, אריזה עם דלתות, חתימה, אימות החתימה ופרסום רילייס.
+# הפעלה ידנית בלבד. דורש את ה-secret ZMANENU_SIGNING_KEY (ראו README).
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: מה חדש (טקסט פשוט, מוצג למשתמש באישור העדכון)
+        required: false
+        default: ''
+      delta_count:
+        description: מספר הגרסאות הקודמות שיקבלו תיקון דלתא (0-4)
+        required: false
+        default: '3'
+      db_version:
+        description: db_version ידני (ריק = הגרסה האחרונה + 1)
+        required: false
+        default: ''
+      otzaria_ref:
+        description: Otzaria/otzaria ref לכלים (ריק = otzaria-tools.ref)
+        required: false
+        default: ''
+      manifest_url_override:
+        description: לריפו בדיקה בלבד — כתובת מניפסט אחרת. לעולם לא בריפו האמיתי.
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Check the update source
+        id: source
+        env:
+          HAS_SIGNING_KEY: ${{ secrets.ZMANENU_SIGNING_KEY != '' }}
+        run: |
+          declared="$(python3 -c 'import json; print(json.load(open("library.json"))["update_manifest_url"])')"
+          expected="https://github.com/${{ github.repository }}/releases/latest/download/manifest.json"
+          override="${{ inputs.manifest_url_override }}"
+          if [ -n "$override" ]; then
+            echo "::warning::manifest_url_override=$override — a test release, not for users."
+            url="$override"
+          elif [ "$declared" != "$expected" ]; then
+            echo "::error::library.json declares $declared but this repository publishes to $expected. The URL is pinned in every installed copy and must never change."
+            exit 1
+          else
+            url="$declared"
+          fi
+          echo "manifest_url=$url" >> "$GITHUB_OUTPUT"
+          if [ "$HAS_SIGNING_KEY" != "true" ]; then
+            echo "::error::secret ZMANENU_SIGNING_KEY is not set."
+            exit 1
+          fi
+
+      - id: tools
+        uses: ./.github/actions/setup-tools
+        with:
+          otzaria-ref: ${{ inputs.otzaria_ref }}
+
+      - name: Builder tests
+        working-directory: builder
+        run: dart test
+
+      - name: Plan the version and fetch previous releases
+        id: plan
+        run: |
+          python3 scripts/release_plan.py --repo "${{ github.repository }}" \
+            --out "$RUNNER_TEMP/previous" --deltas "${{ inputs.delta_count }}" \
+            --db-version "${{ inputs.db_version }}"
+
+      - name: Build
+        id: build
+        run: |
+          out="$RUNNER_TEMP/dist"
+          previous="${{ steps.plan.outputs.previous_db }}"
+          cd builder
+          dart run bin/zmanenu.dart build --source ../source --library ../library.json \
+            --out "$out" --db-version "${{ steps.plan.outputs.db_version }}" \
+            --manifest-url "${{ steps.source.outputs.manifest_url }}" \
+            ${previous:+--previous-db "$previous"}
+          db="$(python3 -c 'import json; print(json.load(open("../library.json"))["db_file_name"])')"
+          echo "db=$out/$db" >> "$GITHUB_OUTPUT"
+          echo "dist=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Validate
+        env:
+          OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
+        run: bash scripts/otzaria-tools.sh validate "${{ steps.build.outputs.db }}"
+
+      - name: Pack (full + deltas)
+        env:
+          OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
+          NOTES: ${{ inputs.release_notes }}
+        run: |
+          version="${{ steps.plan.outputs.db_version }}"
+          rel="$RUNNER_TEMP/release"
+          rm -rf "$rel" && mkdir -p "$rel"
+          printf '%s\n' "${NOTES:-גרסה $version}" > "$RUNNER_TEMP/notes.txt"
+          args=()
+          for old in ${{ steps.plan.outputs.delta_from }}; do args+=(--delta-from "$old"); done
+          bash scripts/otzaria-tools.sh update pack "${{ steps.build.outputs.db }}" \
+            --out "$rel" \
+            --url-prefix "https://github.com/${{ github.repository }}/releases/download/v$version" \
+            --notes "$RUNNER_TEMP/notes.txt" "${args[@]}"
+
+      - name: Sign
+        env:
+          OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
+          SIGNING_KEY: ${{ secrets.ZMANENU_SIGNING_KEY }}
+        run: |
+          key="$RUNNER_TEMP/signing.key"
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
+          trap 'rm -f "$key"' EXIT
+          bash scripts/otzaria-tools.sh update sign "$RUNNER_TEMP/release/manifest.json" --key "$key"
+
+      - name: Verify signature, parts and deltas
+        env:
+          OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
+        run: |
+          args=()
+          for old in ${{ steps.plan.outputs.delta_from }}; do args+=(--delta-from "$old"); done
+          bash scripts/otzaria-tools.sh update verify "$RUNNER_TEMP/release/manifest.json" \
+            --db "${{ steps.build.outputs.db }}" --parts "$RUNNER_TEMP/release" \
+            --zstd-lib "$(ldconfig -p | awk '/libzstd\.so\.1 / {print $NF; exit}')" "${args[@]}"
+
+      - name: First-install bundle
+        run: |
+          cd "${{ steps.build.outputs.dist }}"
+          zip -qr "$RUNNER_TEMP/release/zmanenu.zip" .
+
+      - name: Publish the release
+        run: |
+          version="${{ steps.plan.outputs.db_version }}"
+          tag="v$version"
+          # Draft first: "latest" moves only after every asset is uploaded.
+          gh release create "$tag" --repo "${{ github.repository }}" --draft \
+            --target "${{ github.sha }}" --title "מחברי זמנינו $tag" \
+            --notes-file "$RUNNER_TEMP/notes.txt" "$RUNNER_TEMP"/release/*
+          gh release edit "$tag" --repo "${{ github.repository }}" --draft=false --latest
+          echo "Published $tag: https://github.com/${{ github.repository }}/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
