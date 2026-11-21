@@ -13,10 +13,9 @@ release without the network:
 The tar is deterministic: entries sorted by name, fixed mtime, owner 0, mode
 0644, UTF-8 (PAX) names.
 
-The archive is always published in parts, like the official library (the app's
-download assistant finds an asset by its part-000), even below the limit:
-<archive>.part-000, -001 ... of up to 1992294400 bytes, and
-<archive>.manifest.json in the format of tool/release/split_release_asset.sh.
+Up to 1992294400 bytes the archive is published as one file. A larger one is
+split the way the official library splits it (tool/release/split_release_asset.sh
+in the app): <archive>.part-000, -001 ... and <archive>.manifest.json.
 
   offline_bundle.py pack --db zmanenu.db --manifest manifest.json --out-dir DIR [--zstd zstd]
 """
@@ -175,9 +174,12 @@ def pack(db, manifest_path, out_dir, zstd):
     check_archive(archive, zstd, os.path.basename(db), full, manifest_bytes, sig_bytes)
 
     size = os.path.getsize(archive)
-    parts = split(archive, out_dir)
-    check_parts(out_dir)
-    print(f'{ARCHIVE}: {size} bytes in {len(parts)} part(s), see {ARCHIVE}.manifest.json')
+    if size > PART_SIZE:
+        parts = split(archive, out_dir)
+        check_parts(out_dir)
+        print(f'{ARCHIVE}: {size} bytes in {len(parts)} parts, see {ARCHIVE}.manifest.json')
+    else:
+        print(f'{archive}: {size} bytes, {os.path.basename(db)} sha256 {full["sha256"]}')
 
 
 def check_parts(out_dir):
