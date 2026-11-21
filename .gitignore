@@ -1,0 +1,23 @@
+# Signing keys never enter the repository.
+*.key
+*.key.*
+zmanenu-keys/
+signing.key
+
+# Build output
+/dist/
+/dist-*/
+/release/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.zst
+
+# Dart
+.dart_tool/
+builder/pubspec.lock.bak
+
+# CI checkout of Otzaria/otzaria
+/.otzaria/
+__pycache__/
