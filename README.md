@@ -102,7 +102,7 @@ dart run tool/validate_personal_db.dart /path/to/dist/zmanenu.db
 Actions ← **Release** ← Run workflow, **מהענף `main` בלבד**: מענף אחר ה-workflow אינו רץ, והחתימה דורשת
 אישור של מאשר ב-environment ‏`release`. הפרמטרים: הערות גרסה, מספר הגרסאות שיקבלו דלתא (ברירת מחדל 3),
 `db_version` ידני (אופציונלי) ו-`allow_removed_books`. ה-workflow בונה, מאמת, אורז עם דלתות, חותם בכלי נפרד,
-מאמת את החתימה בקוד האפליקציה, בונה את חבילת האופליין `zmanenu-offline.zip` ומפרסם רילייס `v<db_version>`.
+מאמת את החתימה בקוד האפליקציה, בונה את חבילת האופליין `zmanenu-offline.tar.zst` ומפרסם רילייס `v<db_version>`.
 פירוט מלא, כולל הגדרת ה-environment והסוד: [`docs/release.md`](docs/release.md).
 
 ה-workflow **Check** רץ על כל push ועל PR מ-fork: בדיקות, בנייה של `source/` ושל `examples/`, ואימות. הוא אינו מפרסם.
@@ -117,6 +117,5 @@ Actions ← **Release** ← Run workflow, **מהענף `main` בלבד**: מענ
 
 ## רישיון
 
-אותו רישיון כמו של ספריית אוצריא הרשמית ([`Otzaria/otzaria-library`](https://github.com/Otzaria/otzaria-library)),
-ראו [`LICENSE`](LICENSE). כמו שם, הוא חל על העבודה המקורית של פרויקט אוצריא בריפו, והספרים עצמם כפופים לתנאים
-שקבעו בעלי הזכויות בהם.
+ראו [`LICENSE`](LICENSE). זה אותו רישיון כמו של ספריית אוצריא הרשמית
+([`Otzaria/otzaria-library`](https://github.com/Otzaria/otzaria-library)).
