@@ -181,13 +181,6 @@ class _Reader {
       );
       return;
     }
-    if (categoryPath.isEmpty) {
-      issues.error(
-        rel,
-        'ספר ישירות תחת books/ — יש לשים כל ספר בתוך תיקייה (קטגוריה).',
-      );
-      return;
-    }
     if (title.isEmpty) {
       issues.error(rel, 'שם קובץ ריק.');
       return;

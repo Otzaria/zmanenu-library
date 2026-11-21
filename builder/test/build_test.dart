@@ -274,10 +274,6 @@ void main() {
       expectError({'books/אחרת/ספר א.txt': 'טקסט\n'}, 'כותרת כפולה');
     });
 
-    test('book directly under books/', () {
-      expectError({'books/ספר ג.txt': 'טקסט\n'}, 'יש לשים כל ספר בתוך תיקייה');
-    });
-
     test('metadata of an unknown book, unknown key and unknown generation', () {
       final errors = errorsOf(
         makeSource(
@@ -383,6 +379,24 @@ void main() {
     test('empty heading', () {
       expectError({'books/קטגוריה/ספר ג.txt': '<h2></h2>\nטקסט\n'}, 'ריקה');
     });
+  });
+
+  test('a book directly under books/ has no category', () {
+    final result = run(makeSource(files: {'books/ספר ג.txt': 'טקסט\n'}));
+    final db = sqlite3.open(result.dbPath, mode: OpenMode.readOnly);
+    addTearDown(db.close);
+    final row = db
+        .select("SELECT categoryId FROM book WHERE title = 'ספר ג'")
+        .single;
+    expect(row['categoryId'], 0);
+    expect(db.select('SELECT 1 FROM category WHERE id = 0'), isEmpty);
+    expect(
+      db.select(
+        "SELECT 1 FROM book_topic t JOIN book b ON b.id = t.bookId "
+        "WHERE b.title = 'ספר ג'",
+      ),
+      isEmpty,
+    );
   });
 
   test('desktop.ini and Thumbs.db are ignored everywhere', () {

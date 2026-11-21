@@ -320,7 +320,9 @@ class _Writer {
     final all = book.lines.join('\n');
     _insert('book', {
       'id': book.id,
-      'categoryId': _categoryIds[book.categoryKey],
+      // 0 matches no category: the app lists the book directly under
+      // library_folder ("looseBooks" in _addAttachedLibraryToCatalog).
+      'categoryId': _categoryIds[book.categoryKey] ?? 0,
       'sourceId': 1,
       'title': book.title,
       'heRef': book.title,
