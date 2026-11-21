@@ -142,11 +142,6 @@ jobs:
           db="$(python3 -c 'import json; print(json.load(open("../library.json"))["db_file_name"])')"
           echo "db=$out/$db" >> "$GITHUB_OUTPUT"
 
-      - name: Check the size of the offline package
-        env:
-          DB: ${{ steps.build.outputs.db }}
-        run: python3 scripts/offline_bundle.py check-size --db "$DB"
-
       - name: Validate
         env:
           OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
@@ -297,8 +292,9 @@ jobs:
           if str(m['db_version']) != sys.argv[2]:
               sys.exit(f"manifest db_version {m['db_version']} != release v{sys.argv[2]}")
           PY
+          # zmanenu-offline.tar.zst, or its parts + manifest when over the GitHub asset limit.
           python3 scripts/offline_bundle.py pack --db "$work/$db" \
-            --manifest "$work/release/manifest.json" --out "$work/release/zmanenu-offline.zip"
+            --manifest "$work/release/manifest.json" --out-dir "$work/release"
           mkdir -p "$RUNNER_TEMP/publish"
           mv "$work/release" "$RUNNER_TEMP/publish/release"
           mv "$work/notes.txt" "$RUNNER_TEMP/publish/notes.txt"

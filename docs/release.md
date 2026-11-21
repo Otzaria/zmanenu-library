@@ -33,29 +33,36 @@ https://github.com/Otzaria/zmanenu-library/releases/download/v<db_version>/manif
 | `manifest.json`, `manifest.json.sig` | המניפסט והחתימה עליו (ed25519, base64 ושורה חדשה) |
 | `otzaria.zmanenu-<N>.db.zst` (או חלקים שלו) | המסד המלא, דחוס ב-zstd |
 | `otzaria.zmanenu-<N>.db.from-<M>.patch.zst` | תיקוני דלתא מגרסאות קודמות |
-| `zmanenu-offline.zip` | חבילת האופליין, ראו בהמשך |
+| `zmanenu-offline.tar.zst` (או חלקים ומניפסט) | חבילת האופליין, ראו בהמשך |
 
-### חבילת האופליין — `zmanenu-offline.zip`
+### חבילת האופליין — `zmanenu-offline.tar.zst`
 
-קובץ ZIP אחד, שאוצריא יכולה לייבא ולאמת בלי רשת. בשורש שלו יש **בדיוק** שלושה קבצים, בלי תיקיות:
+ארכיון tar דחוס ב-zstd, שאוצריא יכולה לייבא ולאמת בלי רשת. זה אותו פורמט כמו חבילת הספרייה הרשמית
+`otzaria-<version>-library.tar.zst` (`build-and-announce.yml` באפליקציה). בשורש ה-tar יש **בדיוק** שלוש רשומות,
+בלי תיקיות:
 
 | שם | תוכן |
 |---|---|
-| `zmanenu.db` | המסד המלא, הקובץ עצמו ולא דחוס ב-zstd. ה-sha256 והגודל שלו שווים ל-`full.sha256` ול-`full.size` שבמניפסט |
+| `zmanenu.db` | המסד המלא, לא דחוס בתוך ה-tar. ה-sha256 והגודל שלו שווים ל-`full.sha256` ול-`full.size` שבמניפסט |
 | `manifest.json` | זהה בבתים לקובץ שמתפרסם ברילייס |
 | `manifest.json.sig` | זהה בבתים לקובץ שמתפרסם ברילייס |
 
-- הרשומות דחוסות ב-deflate של ZIP (שיטה 8). שמות הקבצים ב-UTF-8 (כאן כולם ASCII), ונכתבים ב-python `zipfile`
-  עם ZIP64 כשצריך.
-- אימות בייבוא: לבדוק את `manifest.json.sig` מול המפתח הנעוץ, לקרוא את `full.sha256` ו-`full.size`, ולוודא
+- **דחיסה:** `zstd -19 -T0`, כמו החבילה הרשמית. בלי `--long`, כך שהחלון נשאר בתוך ברירת המחדל של המפענח
+  (`windowLogMax` 27), ו-`zstd_stream_extractor.dart` באפליקציה פותח אותה בלי הגדרה נוספת.
+- **tar דטרמיניסטי:** רשומות ממוינות לפי שם, mtime קבוע (2020-01-01), בעלים 0, הרשאות 0644, ושמות ב-UTF-8
+  (פורמט PAX). אותם קבצים נותנים בדיוק אותה חבילה.
+- **אימות בייבוא:** לבדוק את `manifest.json.sig` מול המפתח הנעוץ, לקרוא את `full.sha256` ו-`full.size`, ולוודא
   שהם מתאימים ל-`zmanenu.db`. `library_id` ו-`db_version` במניפסט מזהים את הגרסה.
 - הקובץ מחליף את `zmanenu.zip` של הגרסאות הראשונות.
-- נבנה ב-[`scripts/offline_bundle.py`](../scripts/offline_bundle.py), שקורא אותו שוב בסוף ובודק את שלושת התנאים.
+- נבנה ב-[`scripts/offline_bundle.py`](../scripts/offline_bundle.py), שמחלץ אותו שוב בסוף ובודק את הרשומות,
+  את ה-sha ואת הזהות בבתים של המניפסט והחתימה.
 
-**מגבלת 2GB:** GitHub אינו מקבל קובץ רילייס של 2GiB ומעלה. ה-workflow נכשל **לפני החתימה והפרסום** אם המסד
-עצמו מגיע ל-2GiB (`offline_bundle.py check-size`), ושוב אם ה-ZIP עובר את המגבלה. אם המסד יגיע לגודל הזה, צריך
-לפצל את חבילת האופליין לכמה קבצים. פורמט כזה עוד לא קיים, וצריך להגדיר אותו יחד עם הייבוא באפליקציה לפני
-הגרסה הבאה. החלקים של המסד המלא, לעומת זאת, כבר מפוצלים לפי `--part-size`.
+**מעל 2GB:** GitHub אינו מקבל קובץ רילייס של 2GiB ומעלה. כשהחבילה גדולה מ-1992294400 בתים, היא מפוצלת
+במוסכמה של הספרייה הרשמית (`tool/release/split_release_asset.sh` באפליקציה): החלקים
+`zmanenu-offline.tar.zst.part-000`, `part-001` וכן הלאה, וקובץ `zmanenu-offline.tar.zst.manifest.json` עם
+`schemaVersion`, `archive`, `size`, `sha256`, `partSizeLimit`, `githubAssetLimit` ו-`parts` (`name`, `size`,
+`sha256`). משרשרים את החלקים לפי הסדר, למשל עם `assemble_split_asset.sh`, ובודקים את ה-sha256 של הארכיון.
+מתחת לסף מתפרסם קובץ יחיד בלי מניפסט חלקים.
 
 ## ה-workflow ‏Release
 
@@ -82,7 +89,7 @@ Actions ← **Release** ← Run workflow, **מהענף `main` בלבד**. הרצ
      האחרון, שממנו נשמרים מזהי הספרים. כל מסד נבנה מחדש מהחלקים ונבדק מול ה-sha256 שבמניפסט שלו.
    - בנייה עם `--release` ו-`--previous-db`: מסד בלי ספרים, ספר שנעלם בלי `renamedFrom`, או `library_id`,
      `library_folder`, כתובת המניפסט או מפתח ציבורי ששונים מהמסד הקודם, עוצרים כאן.
-   - בדיקת הגודל של חבילת האופליין, `validate_personal_db`, ו-`personal_db_update pack` עם `--delta-from`.
+   - `validate_personal_db`, ו-`personal_db_update pack` עם `--delta-from`.
 2. **sign** (environment ‏`release`): checkout של `signer/` ו-`library.json` בלבד, Dart, ו-
    `dart pub get --enforce-lockfile` של [`signer/`](../signer), שתלוי רק ב-`pinenacl` בגרסה נעוצה. בדיקה בבאש
    שהסוד הוא מפתח של 32 בתים ב-base64, בלי להדפיס אותו. החתימה בודקת שהמפתח תואם ל-`update_public_key`
@@ -167,5 +174,5 @@ bash scripts/otzaria-tools.sh update pack "$T/dist/zmanenu.db" --out "$T/release
 bash scripts/otzaria-tools.sh update verify "$T/release/manifest.json" --db "$T/dist/zmanenu.db" \
   --parts "$T/release" --delta-from "$T/old.db" --zstd-lib /path/to/libzstd
 python3 scripts/offline_bundle.py pack --db "$T/dist/zmanenu.db" \
-  --manifest "$T/release/manifest.json" --out "$T/release/zmanenu-offline.zip"
+  --manifest "$T/release/manifest.json" --out-dir "$T/release"
 ```

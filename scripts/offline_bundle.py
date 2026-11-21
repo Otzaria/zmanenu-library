@@ -1,30 +1,41 @@
 #!/usr/bin/env python3
-"""The offline package of a release: zmanenu-offline.zip.
+"""The offline package of a release: zmanenu-offline.tar.zst.
 
-The zip holds exactly three entries at its root, so the app can import and
-verify a release without the network:
+A tar, compressed like the official library bundle (`zstd -19 -T0`, see
+otzaria-<version>-library.tar.zst in the app's build-and-announce.yml), that
+holds exactly three entries at its root, so the app can import and verify a
+release without the network:
 
-  zmanenu.db          the full database, byte for byte (sha256 = manifest full.sha256)
   manifest.json       exactly as published in the release
   manifest.json.sig   exactly as published in the release
+  zmanenu.db          the full database, byte for byte (sha256 = manifest full.sha256)
 
-  offline_bundle.py check-size --db zmanenu.db
-  offline_bundle.py pack --db zmanenu.db --manifest manifest.json --out zmanenu-offline.zip
+The tar is deterministic: entries sorted by name, fixed mtime, owner 0, mode
+0644, UTF-8 (PAX) names.
 
-`check-size` fails early, before signing, when the package cannot be published:
-GitHub release assets must be smaller than 2 GiB.
+When the archive is larger than one GitHub release asset may be, it is split
+the way the official library splits it (tool/release/split_release_asset.sh in
+the app): <archive>.part-000, -001 ... of 1992294400 bytes and
+<archive>.manifest.json listing them.
+
+  offline_bundle.py pack --db zmanenu.db --manifest manifest.json --out-dir DIR [--zstd zstd]
 """
 import argparse
 import hashlib
+import io
 import json
 import os
+import subprocess
 import sys
-import zipfile
+import tarfile
+import tempfile
 
-# GitHub rejects release assets of 2 GiB and more.
-MAX_ASSET_BYTES = 2 * 1024 ** 3 - 1
-# Fixed timestamp: the same files give the same zip.
-ZIP_TIME = (2020, 1, 1, 0, 0, 0)
+ARCHIVE = 'zmanenu-offline.tar.zst'
+ZSTD_ARGS = ['-19', '-T0']
+# Same values as split_release_asset.sh.
+PART_SIZE = 1992294400
+GITHUB_LIMIT = 2147483648
+TAR_MTIME = 1577836800  # 2020-01-01T00:00:00Z
 
 
 def fail(message):
@@ -40,23 +51,106 @@ def sha256_of(path):
     return h.hexdigest()
 
 
-def check_size(db):
-    size = os.path.getsize(db)
-    if size > MAX_ASSET_BYTES:
-        fail(f'{os.path.basename(db)} is {size} bytes. The offline package would pass the '
-             f'2 GiB limit of a GitHub release asset; see docs/release.md before releasing.')
-    return size
-
-
-def entry(name):
-    info = zipfile.ZipInfo(name, ZIP_TIME)
-    info.compress_type = zipfile.ZIP_DEFLATED
-    info.external_attr = 0o644 << 16
+def tar_info(name, size):
+    info = tarfile.TarInfo(name)
+    info.size = size
+    info.mtime = TAR_MTIME
+    info.mode = 0o644
+    info.uid = info.gid = 0
+    info.uname = info.gname = ''
+    info.type = tarfile.REGTYPE
     return info
 
 
-def pack(db, manifest_path, out):
-    check_size(db)
+def write_tar(path, db, manifest_bytes, sig_bytes):
+    entries = {
+        os.path.basename(db): None,
+        'manifest.json': manifest_bytes,
+        'manifest.json.sig': sig_bytes,
+    }
+    with tarfile.open(path, 'w', format=tarfile.PAX_FORMAT, encoding='utf-8') as tar:
+        for name in sorted(entries):
+            data = entries[name]
+            if data is None:
+                with open(db, 'rb') as f:
+                    tar.addfile(tar_info(name, os.path.getsize(db)), f)
+            else:
+                tar.addfile(tar_info(name, len(data)), io.BytesIO(data))
+
+
+def check_archive(archive, zstd, db_name, full, manifest_bytes, sig_bytes):
+    """Extracts the archive the way an importer would and checks every entry."""
+    proc = subprocess.Popen([zstd, '-d', '-c', '-q', archive], stdout=subprocess.PIPE)
+    seen = []
+    with tarfile.open(fileobj=proc.stdout, mode='r|', encoding='utf-8') as tar:
+        for member in tar:
+            seen.append(member.name)
+            if not member.isfile():
+                fail(f'{member.name} in {archive} is not a regular file')
+            f = tar.extractfile(member)
+            if member.name == db_name:
+                h = hashlib.sha256()
+                size = 0
+                for chunk in iter(lambda: f.read(1 << 20), b''):
+                    h.update(chunk)
+                    size += len(chunk)
+                if h.hexdigest() != full['sha256'] or size != full['size']:
+                    fail(f'{db_name} inside {archive} does not match full.sha256/full.size')
+            elif member.name == 'manifest.json':
+                if f.read() != manifest_bytes:
+                    fail(f'manifest.json inside {archive} differs from the published one')
+            elif member.name == 'manifest.json.sig':
+                if f.read() != sig_bytes:
+                    fail(f'manifest.json.sig inside {archive} differs from the published one')
+    proc.stdout.close()
+    if proc.wait() != 0:
+        fail(f'zstd could not decompress {archive}')
+    expected = sorted([db_name, 'manifest.json', 'manifest.json.sig'])
+    if seen != expected:
+        fail(f'unexpected entries in {archive}: {seen}')
+
+
+def split(archive, out_dir):
+    """Parts and manifest in the format of split_release_asset.sh."""
+    base = os.path.basename(archive)
+    parts = []
+    with open(archive, 'rb') as src:
+        index = 0
+        while True:
+            name = f'{base}.part-{index:03d}'
+            path = os.path.join(out_dir, name)
+            h = hashlib.sha256()
+            size = 0
+            with open(path, 'wb') as dst:
+                while size < PART_SIZE:
+                    chunk = src.read(min(1 << 20, PART_SIZE - size))
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+                    h.update(chunk)
+                    size += len(chunk)
+            if size == 0:
+                os.remove(path)
+                break
+            parts.append({'name': name, 'size': size, 'sha256': h.hexdigest()})
+            index += 1
+    manifest = {
+        'schemaVersion': 1,
+        'archive': base,
+        'size': os.path.getsize(archive),
+        'sha256': sha256_of(archive),
+        'partSizeLimit': PART_SIZE,
+        'githubAssetLimit': GITHUB_LIMIT,
+        'parts': parts,
+    }
+    with open(os.path.join(out_dir, f'{base}.manifest.json'), 'w', encoding='utf-8') as f:
+        json.dump(manifest, f, indent=2)
+        f.write('\n')
+    os.remove(archive)
+    return parts
+
+
+def pack(db, manifest_path, out_dir, zstd):
     sig_path = manifest_path + '.sig'
     for path in (db, manifest_path, sig_path):
         if not os.path.isfile(path):
@@ -69,50 +163,35 @@ def pack(db, manifest_path, out):
     if sha256_of(db) != full['sha256'] or os.path.getsize(db) != full['size']:
         fail(f'{db} does not match full.sha256/full.size of the manifest')
 
-    db_name = os.path.basename(db)
-    if os.path.exists(out):
-        os.remove(out)
-    with zipfile.ZipFile(out, 'w', allowZip64=True) as z:
-        with open(db, 'rb') as src, z.open(entry(db_name), 'w', force_zip64=True) as dst:
-            for chunk in iter(lambda: src.read(1 << 20), b''):
-                dst.write(chunk)
-        z.writestr(entry('manifest.json'), manifest_bytes)
-        z.writestr(entry('manifest.json.sig'), sig_bytes)
+    os.makedirs(out_dir, exist_ok=True)
+    archive = os.path.join(out_dir, ARCHIVE)
+    for stale in [archive, archive + '.manifest.json']:
+        if os.path.exists(stale):
+            os.remove(stale)
+    with tempfile.TemporaryDirectory(dir=out_dir) as work:
+        tar_path = os.path.join(work, 'zmanenu-offline.tar')
+        write_tar(tar_path, db, manifest_bytes, sig_bytes)
+        subprocess.run([zstd, *ZSTD_ARGS, '-q', '-f', tar_path, '-o', archive], check=True)
+    check_archive(archive, zstd, os.path.basename(db), full, manifest_bytes, sig_bytes)
 
-    # Read it back the way an importer would.
-    with zipfile.ZipFile(out) as z:
-        names = sorted(z.namelist())
-        if names != sorted([db_name, 'manifest.json', 'manifest.json.sig']):
-            fail(f'unexpected entries in {out}: {names}')
-        h = hashlib.sha256()
-        with z.open(db_name) as f:
-            for chunk in iter(lambda: f.read(1 << 20), b''):
-                h.update(chunk)
-        if h.hexdigest() != full['sha256']:
-            fail(f'{db_name} inside {out} does not match full.sha256')
-        if z.read('manifest.json') != manifest_bytes or z.read('manifest.json.sig') != sig_bytes:
-            fail(f'the manifest inside {out} differs from the published one')
-    size = os.path.getsize(out)
-    if size > MAX_ASSET_BYTES:
-        os.remove(out)
-        fail(f'{out} is {size} bytes, over the 2 GiB limit of a GitHub release asset')
-    print(f'{out}: {size} bytes, {db_name} sha256 {full["sha256"]}')
+    size = os.path.getsize(archive)
+    if size > PART_SIZE:
+        parts = split(archive, out_dir)
+        print(f'{ARCHIVE}: {size} bytes in {len(parts)} parts, see {ARCHIVE}.manifest.json')
+    else:
+        print(f'{archive}: {size} bytes, {os.path.basename(db)} sha256 {full["sha256"]}')
 
 
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest='command', required=True)
-    c = sub.add_parser('check-size')
-    c.add_argument('--db', required=True)
     k = sub.add_parser('pack')
     k.add_argument('--db', required=True)
     k.add_argument('--manifest', required=True)
-    k.add_argument('--out', required=True)
+    k.add_argument('--out-dir', required=True)
+    k.add_argument('--zstd', default='zstd')
     a = ap.parse_args()
-    if a.command == 'check-size':
-        print(f'{a.db}: {check_size(a.db)} bytes')
-    else:
-        pack(a.db, a.manifest, a.out)
+    pack(a.db, a.manifest, a.out_dir, a.zstd)
 
 
 if __name__ == '__main__':
