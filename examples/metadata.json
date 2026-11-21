@@ -15,10 +15,7 @@
     "heShortDesc": "ביאור לדוגמה",
     "author": "מבאר לדוגמה",
     "order": 2,
-    "dibburHamatchil": true,
-    "renamedFrom": [
-      "ביאור קיצור הלכות שבת"
-    ]
+    "dibburHamatchil": true
   },
   "קיצור הלכות שבת לדוגמה - תרגום": {
     "order": 3,
