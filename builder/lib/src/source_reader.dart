@@ -588,26 +588,9 @@ class _Reader {
 
     if (library != null) {
       // Link to another database: the target cannot be checked here.
-      final String? targetSource;
-      if (library == 'official' || library == 'רשמי') {
-        targetSource = 'official';
-      } else if (library == 'any' || library == 'כל') {
-        targetSource = null;
-      } else if (library == config.libraryId) {
-        issues.error(
-          at,
-          'target_library הוא המסד הזה — השמיטו את השדה לקישור פנימי.',
-        );
-        return;
-      } else if (isValidLibraryId(library)) {
-        targetSource = library;
-      } else {
-        issues.error(
-          at,
-          'target_library "$library" לא תקין: official, any, או library_id של מסד אחר.',
-        );
-        return;
-      }
+      final target = _targetLibrary(library, at);
+      if (target == null) return;
+      final targetSource = target.source;
       final targetLine = _int(e['line_index_2'], at, 'line_index_2');
       if (heRef == null && targetLine == null) {
         issues.error(
@@ -1091,6 +1074,7 @@ class _Reader {
       return;
     }
     final seenBooks = <BookSource>{};
+    final seenExternal = <String>{};
     for (var i = 0; i < json.length; i++) {
       final e = json[i];
       final at = '$relPath [${i + 1}]';
@@ -1103,10 +1087,34 @@ class _Reader {
         );
         continue;
       }
-      final book = _book(e['book'] as String, at);
-      if (book == null) continue;
-      if (!seenBooks.add(book)) {
-        issues.error(at, '"${book.title}" מופיע פעמיים.');
+      for (final k in e.keys) {
+        if (!{'book', listKey, 'target_library'}.contains(k)) {
+          issues.error(
+            at,
+            'מפתח לא מוכר "$k" (book, $listKey, target_library).',
+          );
+        }
+      }
+      final title = (e['book'] as String).trim();
+      final library = _str(e['target_library'], at, 'target_library');
+      BookSource? book;
+      ({String? source})? external;
+      if (library == null) {
+        book = _book(title, at);
+        if (book == null) continue;
+        if (!seenBooks.add(book)) {
+          issues.error(at, '"${book.title}" מופיע פעמיים.');
+        }
+      } else {
+        external = _targetLibrary(library, at);
+        if (external == null) continue;
+        if (title.isEmpty || title.length > 512) {
+          issues.error(at, '"book" ריק או ארוך מ-512 תווים.');
+          continue;
+        }
+        if (!seenExternal.add('${external.source}|$title')) {
+          issues.error(at, '"$title" ($library) מופיע פעמיים.');
+        }
       }
       final list = e[listKey] as List;
       final seenTargets = <BookSource>{};
@@ -1123,11 +1131,45 @@ class _Reader {
           issues.error(at, '"$t" מופיע פעמיים.');
           continue;
         }
-        (commentators ? out.defaultCommentators : out.defaultTargums).add(
-          DefaultSlot(book, target, pos),
-        );
+        if (external != null) {
+          out.externalDefaults.add(
+            ExternalDefault(
+              targetSource: external.source,
+              targetTitle: title,
+              book: target,
+              kind: commentators ? 'commentator' : 'targum',
+              position: pos,
+            ),
+          );
+        } else {
+          (commentators ? out.defaultCommentators : out.defaultTargums).add(
+            DefaultSlot(book!, target, pos),
+          );
+        }
       }
     }
+  }
+
+  /// `target_library` as stored in `targetSource`: 'official', another
+  /// library_id, or null for "any". Null result = an error was reported.
+  ({String? source})? _targetLibrary(String library, String at) {
+    if (library == 'official' || library == 'רשמי') {
+      return (source: 'official');
+    }
+    if (library == 'any' || library == 'כל') return (source: null);
+    if (library == config.libraryId) {
+      issues.error(
+        at,
+        'target_library הוא המסד הזה — השמיטו את השדה כשהיעד במסד הזה.',
+      );
+      return null;
+    }
+    if (isValidLibraryId(library)) return (source: library);
+    issues.error(
+      at,
+      'target_library "$library" לא תקין: official, any, או library_id של מסד אחר.',
+    );
+    return null;
   }
 }
 

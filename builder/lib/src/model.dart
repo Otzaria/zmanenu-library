@@ -178,6 +178,27 @@ class DefaultSlot {
   final int position;
 }
 
+/// `external_default_commentator`: a book of this database as a default
+/// commentator or targum of a book in another database.
+class ExternalDefault {
+  ExternalDefault({
+    required this.targetSource,
+    required this.targetTitle,
+    required this.book,
+    required this.kind,
+    required this.position,
+  });
+
+  /// 'official', another library_id, or null for any source.
+  final String? targetSource;
+  final String targetTitle;
+  final BookSource book;
+
+  /// 'commentator' or 'targum'.
+  final String kind;
+  final int position;
+}
+
 class LibrarySource {
   final List<CategoryNode> categories = [];
   final List<BookSource> books = [];
@@ -188,6 +209,7 @@ class LibrarySource {
   final List<Edition> editions = [];
   final List<DefaultSlot> defaultCommentators = [];
   final List<DefaultSlot> defaultTargums = [];
+  final List<ExternalDefault> externalDefaults = [];
 
   /// Stored in schema_meta so ids of deleted books are never reused.
   int nextBookId = 1;

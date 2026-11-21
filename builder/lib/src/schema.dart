@@ -2,6 +2,8 @@
 /// differences that personal databases allow: text stays in `line.content`
 /// (no `line_content` split, no zstd dictionary), and `book` carries the
 /// `fileType`/`filePath` columns of personal databases, always NULL here.
+/// Every table the app knows is created, even when empty ([kAppKnownTables]),
+/// except [kOmittedTables].
 const List<String> kSchema = [
   '''CREATE TABLE schema_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)''',
   '''CREATE TABLE category (
@@ -106,6 +108,46 @@ const List<String> kSchema = [
     sourceBookId INTEGER NOT NULL, sourceLineIndex INTEGER NOT NULL,
     targetSource TEXT, targetTitle TEXT NOT NULL, targetRef TEXT,
     targetLineIndex INTEGER, connectionType TEXT)''',
+  // Tables the app reads and this builder does not fill yet. They are created
+  // empty, so content added later needs no schema change.
+  '''CREATE TABLE book_base_text (
+    bookId INTEGER NOT NULL, baseBookId INTEGER NOT NULL,
+    PRIMARY KEY (bookId, baseBookId))''',
+  '''CREATE TABLE link_suppressed_side (
+    linkId INTEGER NOT NULL, side INTEGER NOT NULL CHECK (side IN (0, 1)),
+    reasonMask INTEGER NOT NULL CHECK (reasonMask > 0 AND (reasonMask & -16) = 0),
+    PRIMARY KEY (linkId, side))''',
+  '''CREATE TABLE banner (id INTEGER PRIMARY KEY NOT NULL, text TEXT NOT NULL)''',
+  '''CREATE TABLE book_banner (bookId INTEGER PRIMARY KEY NOT NULL, bannerId INTEGER NOT NULL)''',
+  '''CREATE TABLE book_protection (
+    bookId INTEGER PRIMARY KEY NOT NULL, level INTEGER NOT NULL CHECK (level >= 1))''',
+  '''CREATE TABLE line_divine_name (
+    lineId INTEGER NOT NULL, charStart INTEGER NOT NULL, span INTEGER NOT NULL,
+    PRIMARY KEY (lineId, charStart)) WITHOUT ROWID''',
+  '''CREATE TABLE line_note (
+    lineId INTEGER NOT NULL, noteIndex INTEGER NOT NULL, charPos INTEGER NOT NULL,
+    hasMarker INTEGER NOT NULL, body TEXT NOT NULL,
+    PRIMARY KEY (lineId, noteIndex)) WITHOUT ROWID''',
+  '''CREATE TABLE line_note_divine_name (
+    lineId INTEGER NOT NULL, noteIndex INTEGER NOT NULL,
+    charStart INTEGER NOT NULL, span INTEGER NOT NULL,
+    PRIMARY KEY (lineId, noteIndex, charStart)) WITHOUT ROWID''',
+  '''CREATE TABLE db_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)''',
+  '''CREATE TABLE user_alt_toc_structure (
+    id INTEGER PRIMARY KEY NOT NULL, bookId INTEGER NOT NULL, key TEXT NOT NULL,
+    heTitle TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL, UNIQUE (bookId, key))''',
+  '''CREATE TABLE user_alt_toc_entry (
+    id INTEGER PRIMARY KEY NOT NULL, structureId INTEGER NOT NULL, parentId INTEGER,
+    level INTEGER NOT NULL, text TEXT NOT NULL, lineIndex INTEGER,
+    isLastChild INTEGER NOT NULL DEFAULT 0, hasChildren INTEGER NOT NULL DEFAULT 0)''',
+  // A book of this database as a default commentator/targum of a book in
+  // another database. targetSource: 'official', a library_id, or NULL = any.
+  '''CREATE TABLE external_default_commentator (
+    targetSource TEXT, targetTitle TEXT NOT NULL,
+    commentatorBookId INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'commentator', position INTEGER NOT NULL,
+    PRIMARY KEY (targetSource, targetTitle, commentatorBookId, kind))''',
 ];
 
 const List<String> kIndexes = [
@@ -136,7 +178,69 @@ const List<String> kIndexes = [
   'CREATE INDEX idx_default_commentator_book ON default_commentator(bookId)',
   'CREATE INDEX idx_default_targum_book ON default_targum(bookId)',
   'CREATE INDEX idx_external_link_source ON external_link(sourceBookId, sourceLineIndex)',
+  'CREATE INDEX idx_external_default_commentator_title ON external_default_commentator(targetTitle)',
 ];
+
+/// Copy of `kKnownSeforimTables` (lib/migration/database/db_capabilities.dart
+/// in the app): every table the app reads from a seforim.db-shaped database.
+const Set<String> kAppKnownTables = {
+  'category',
+  'category_closure',
+  'book',
+  'source',
+  'author',
+  'book_author',
+  'topic',
+  'book_topic',
+  'pub_place',
+  'book_pub_place',
+  'pub_date',
+  'book_pub_date',
+  'generation',
+  'book_generation',
+  'book_base_text',
+  'line',
+  'line_content',
+  'line_ref',
+  'line_dh',
+  'tocText',
+  'tocEntry',
+  'line_toc',
+  'connection_type',
+  'link',
+  'link_anchor',
+  'link_range',
+  'link_coverage',
+  'link_suppressed_side',
+  'book_has_links',
+  'book_acronym',
+  'alt_toc_structure',
+  'alt_toc_entry',
+  'line_alt_toc',
+  'user_alt_toc_structure',
+  'user_alt_toc_entry',
+  'default_commentator',
+  'default_targum',
+  'book_version',
+  'version_line',
+  'book_version_link',
+  'schema_meta',
+  'db_meta',
+  'external_link',
+  'banner',
+  'book_banner',
+  'book_protection',
+  'line_divine_name',
+  'line_note',
+  'line_note_divine_name',
+};
+
+/// Known tables the database deliberately does not create, and why.
+const Map<String, String> kOmittedTables = {
+  // Schema 6/7 keeps line text here instead of in line.content. Text is in
+  // line.content in this database, so the table could never be filled.
+  'line_content': 'line text is stored in line.content',
+};
 
 /// `connection_type` rows, with the ids of the official database.
 const List<String> kConnectionTypes = [

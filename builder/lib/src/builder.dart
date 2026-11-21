@@ -101,6 +101,16 @@ void _checkOfficialTargets(
         );
       }
     }
+    for (final d in source.externalDefaults) {
+      if (d.targetSource == 'official' && !titles.contains(d.targetTitle)) {
+        issues.error(
+          d.kind == 'targum'
+              ? 'default_targumim.json'
+              : 'default_commentators.json',
+          'הספר "${d.targetTitle}" לא נמצא בספרייה הרשמית ($officialDb).',
+        );
+      }
+    }
   } finally {
     db.close();
   }
@@ -696,6 +706,15 @@ class _Writer {
         s.target.id,
         s.position,
       ]);
+    }
+    for (final d in source.externalDefaults) {
+      _insert('external_default_commentator', {
+        'targetSource': d.targetSource,
+        'targetTitle': d.targetTitle,
+        'commentatorBookId': d.book.id,
+        'kind': d.kind,
+        'position': d.position,
+      });
     }
   }
 }

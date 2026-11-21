@@ -86,6 +86,7 @@ void main() {
           'link_range',
           'link_coverage',
           'external_link',
+          'external_default_commentator',
           'alt_toc_entry',
           'line_alt_toc',
           'book_version',
@@ -106,6 +107,33 @@ void main() {
           0,
         );
         expect(db.select('PRAGMA journal_mode').first.values.first, 'delete');
+        final external = db.select(
+          'SELECT targetSource, targetTitle, kind, position, b.title AS title '
+          'FROM external_default_commentator e '
+          'JOIN book b ON b.id = e.commentatorBookId',
+        );
+        expect(external.map((r) => r.values).toList(), [
+          ['official', 'בראשית', 'commentator', 0, 'הערות על בראשית לדוגמה'],
+        ]);
+      });
+
+      test('every table the app knows exists, even when empty', () {
+        final db = sqlite3.open(run(examples).dbPath, mode: OpenMode.readOnly);
+        addTearDown(db.close);
+        final tables = {
+          for (final r in db.select(
+            "SELECT name FROM sqlite_master WHERE type = 'table'",
+          ))
+            r['name'] as String,
+        };
+        expect(
+          tables,
+          containsAll(kAppKnownTables.difference(kOmittedTables.keys.toSet())),
+        );
+        expect(tables, contains('external_default_commentator'));
+        for (final omitted in kOmittedTables.keys) {
+          expect(tables, isNot(contains(omitted)));
+        }
       });
 
       test('a SOURCE link is stored as COMMENTARY from the base book', () {
@@ -296,6 +324,42 @@ void main() {
           },
         ]),
       }, 'אין ספר בשם "אין כזה"');
+    });
+
+    test('external default commentator errors', () {
+      final errors = errorsOf(
+        makeSource(
+          files: {
+            'default_commentators.json': jsonEncode([
+              {
+                'book': 'בראשית',
+                'target_library': 'official',
+                'commentators': ['אין כזה'],
+              },
+              {
+                'book': 'בראשית',
+                'target_library': 'otzaria.zmanenu',
+                'commentators': ['ספר ב'],
+              },
+              {
+                'book': 'שמות',
+                'target_library': 'Bad Id!',
+                'commentators': ['ספר ב'],
+              },
+              {
+                'book': 'ויקרא',
+                'target_library': 'official',
+                'commentators': ['ספר ב'],
+                'kind': 'x',
+              },
+            ]),
+          },
+        ),
+      ).join('\n');
+      expect(errors, contains('אין ספר בשם "אין כזה"'));
+      expect(errors, contains('target_library הוא המסד הזה'));
+      expect(errors, contains('target_library "Bad Id!" לא תקין'));
+      expect(errors, contains('מפתח לא מוכר "kind"'));
     });
 
     test('a book that is not a text file', () {
