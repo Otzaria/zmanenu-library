@@ -1,0 +1,33 @@
+[
+  {
+    "key": "topics",
+    "title": "Topics",
+    "heTitle": "לפי נושא",
+    "nodes": [
+      {
+        "heTitle": "ערב שבת",
+        "line": 3,
+        "children": [
+          {
+            "heTitle": "הדלקת נרות",
+            "line": 3
+          }
+        ]
+      },
+      {
+        "heTitle": "ליל שבת ויומו",
+        "line": 6,
+        "children": [
+          {
+            "heTitle": "קידוש",
+            "line": 6
+          },
+          {
+            "heTitle": "סעודות",
+            "line": 9
+          }
+        ]
+      }
+    ]
+  }
+]

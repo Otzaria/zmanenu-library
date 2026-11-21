@@ -1,0 +1,23 @@
+[
+  {
+    "line_index_1": 3,
+    "line_index_2": 3,
+    "book_2": "קיצור הלכות שבת לדוגמה - תרגום",
+    "Conection Type": "targum"
+  },
+  {
+    "line_index_1": 4,
+    "line_index_2": 4,
+    "book_2": "קיצור הלכות שבת לדוגמה - תרגום",
+    "Conection Type": "targum"
+  },
+  {
+    "line_index_1": 6,
+    "start": 10,
+    "end": 14,
+    "line_index_2": 2,
+    "book_2": "קיצור הלכות שבת לדוגמה - נוסח מקוצר",
+    "heRef_2": "קיצור הלכות שבת לדוגמה - נוסח מקוצר 2",
+    "Conection Type": "reference"
+  }
+]
