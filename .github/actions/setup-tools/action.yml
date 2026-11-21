@@ -4,9 +4,13 @@ description: >
   ref) into .otzaria, installs Flutter and resolves both packages.
 inputs:
   otzaria-ref:
-    description: Commit/tag/branch of Otzaria/otzaria; empty = otzaria-tools.ref
+    description: Commit of Otzaria/otzaria; empty = otzaria-tools.ref
     required: false
     default: ''
+  require-sha:
+    description: 'true = the ref must be a full 40-character commit SHA'
+    required: false
+    default: 'false'
   flutter-version:
     description: Flutter version the app builds with
     required: false
@@ -20,14 +24,21 @@ runs:
   steps:
     - id: ref
       shell: bash
+      env:
+        INPUT_REF: ${{ inputs.otzaria-ref }}
+        REQUIRE_SHA: ${{ inputs.require-sha }}
       run: |
-        ref="${{ inputs.otzaria-ref }}"
+        ref="$INPUT_REF"
         [ -n "$ref" ] || ref="$(tr -d '[:space:]' < otzaria-tools.ref)"
+        if [ "$REQUIRE_SHA" = true ] && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::otzaria ref \"$ref\" is not a full 40-character commit SHA."
+          exit 1
+        fi
         echo "ref=$ref" >> "$GITHUB_OUTPUT"
         echo "dir=$GITHUB_WORKSPACE/.otzaria" >> "$GITHUB_OUTPUT"
         echo "Otzaria tools from Otzaria/otzaria@$ref"
 
-    - uses: actions/checkout@v7.0.1
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: Otzaria/otzaria
         ref: ${{ steps.ref.outputs.ref }}
@@ -35,7 +46,7 @@ runs:
         fetch-depth: 1
         persist-credentials: false
 
-    - uses: subosito/flutter-action@v2
+    - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
       with:
         channel: stable
         flutter-version: ${{ inputs.flutter-version }}
@@ -53,4 +64,4 @@ runs:
     - name: Resolve builder packages
       shell: bash
       working-directory: builder
-      run: dart pub get
+      run: dart pub get --enforce-lockfile
