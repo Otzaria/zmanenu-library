@@ -29,7 +29,7 @@ class BuildOptions {
   final String sourceDir;
   final String libraryJson;
 
-  /// The database and the files folder are written here.
+  /// The database is written here.
   final String outDir;
   final int dbVersion;
 
@@ -71,17 +71,9 @@ BuildResult build(BuildOptions options) {
     final f = File('$dbPath$suffix');
     if (f.existsSync()) f.deleteSync();
   }
-  final filesRoot = Directory(p.join(options.outDir, config.filesDir));
-  if (filesRoot.existsSync()) filesRoot.deleteSync(recursive: true);
 
   final manifestUrl = options.manifestUrlOverride ?? config.updateManifestUrl;
   _write(dbPath, config, source, options.dbVersion, manifestUrl);
-
-  for (final book in source.books.where((b) => !b.isText)) {
-    final target = File(p.join(options.outDir, book.storedFilePath!));
-    target.parent.createSync(recursive: true);
-    File(book.absPath).copySync(target.path);
-  }
   return BuildResult(
     dbPath,
     source,
@@ -250,7 +242,7 @@ class _Writer {
       _book(book);
     }
     _lookups(books);
-    for (final book in books.where((b) => b.isText)) {
+    for (final book in books) {
       _lines(book);
     }
     _links(books);
@@ -330,9 +322,7 @@ class _Writer {
       'hasAltStructures': source.altTocs.any((s) => s.book == book) ? 1 : 0,
       'hasTeamim': hasTeamim(all) ? 1 : 0,
       'hasNekudot': hasNekudot(all) ? 1 : 0,
-      'contentHash': book.isText ? fnv64([book.title, ...book.lines]) : 0,
-      'fileType': book.fileExt,
-      'filePath': book.storedFilePath,
+      'contentHash': fnv64([book.title, ...book.lines]),
     });
     for (final term in book.acronyms.toSet()) {
       db.execute('INSERT INTO book_acronym (bookId, term) VALUES (?, ?)', [

@@ -101,14 +101,9 @@ void main() {
         ]) {
           expect(count(table), greaterThan(0), reason: table);
         }
-        final pdf = db
-            .select("SELECT filePath FROM book WHERE fileType = 'pdf'")
-            .first;
         expect(
-          File(
-            p.join(temp.path, 'out', pdf['filePath'] as String),
-          ).existsSync(),
-          isTrue,
+          count('book WHERE fileType IS NOT NULL OR filePath IS NOT NULL'),
+          0,
         );
         expect(db.select('PRAGMA journal_mode').first.values.first, 'delete');
       });
@@ -303,9 +298,39 @@ void main() {
       }, 'אין ספר בשם "אין כזה"');
     });
 
+    test('a book that is not a text file', () {
+      expectError({'books/קטגוריה/מאמר.pdf': '%PDF'}, 'רק ספרי טקסט');
+    });
+
+    test('a non-text file anywhere in the source tree', () {
+      final errors = errorsOf(
+        makeSource(
+          files: {'images/תמונה.png': 'x', 'editions/ספר א/מהדורה.docx': 'x'},
+        ),
+      ).join('\n');
+      expect(errors, contains('images/תמונה.png: קובץ שאינו טקסט'));
+      expect(errors, contains('מותרים רק קובצי .txt ו-editions.json'));
+    });
+
+    test('a binary .txt file', () {
+      expectError({'books/קטגוריה/ספר ג.txt': 'אב\u0000ג\n'}, 'קובץ בינארי');
+    });
+
     test('empty heading', () {
       expectError({'books/קטגוריה/ספר ג.txt': '<h2></h2>\nטקסט\n'}, 'ריקה');
     });
+  });
+
+  test('desktop.ini and Thumbs.db are ignored everywhere', () {
+    final source = makeSource(
+      files: {
+        'desktop.ini': '[.ShellClassInfo]',
+        'books/קטגוריה/desktop.ini': '[.ShellClassInfo]',
+        'books/קטגוריה/Thumbs.db': 'x',
+        'links/Thumbs.db': 'x',
+      },
+    );
+    expect(run(source).source.books, hasLength(2));
   });
 
   group('text helpers', () {

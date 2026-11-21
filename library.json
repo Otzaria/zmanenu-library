@@ -7,6 +7,5 @@
   "description": "ספרי מחברי זמננו — מסד אישי רשמי של אוצריא",
   "author": "אוצריא",
   "default_generation": "מחברי זמננו",
-  "db_file_name": "zmanenu.db",
-  "files_dir": "zmanenu-files"
+  "db_file_name": "zmanenu.db"
 }

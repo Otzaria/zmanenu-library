@@ -31,7 +31,6 @@ class BookSource {
     required this.categoryPath,
     required this.relPath,
     required this.absPath,
-    this.fileExt,
   });
 
   final String title;
@@ -40,9 +39,6 @@ class BookSource {
   /// Path of the source file relative to the source root (for messages).
   final String relPath;
   final String absPath;
-
-  /// null for a text book; otherwise the document extension (pdf, docx...).
-  final String? fileExt;
 
   List<String> lines = const [];
   List<Heading> headings = const [];
@@ -61,11 +57,6 @@ class BookSource {
   List<String> topics = const [];
   bool dibburHamatchil = false;
   bool isBaseBook = false;
-
-  /// `filePath` stored in the database (relative to the database folder).
-  String? storedFilePath;
-
-  bool get isText => fileExt == null;
   String get categoryKey => categoryPath.join('/');
 }
 

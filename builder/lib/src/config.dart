@@ -36,7 +36,6 @@ class LibraryConfig {
     required this.updatePublicKey,
     required this.defaultGeneration,
     required this.dbFileName,
-    required this.filesDir,
     this.description,
     this.author,
   });
@@ -48,7 +47,6 @@ class LibraryConfig {
   final String? updatePublicKey;
   final String? defaultGeneration;
   final String dbFileName;
-  final String filesDir;
   final String? description;
   final String? author;
 
@@ -60,7 +58,6 @@ class LibraryConfig {
     'update_public_key',
     'default_generation',
     'db_file_name',
-    'files_dir',
     'description',
     'author',
   };
@@ -164,13 +161,6 @@ class LibraryConfig {
         dbFileName.contains('\\')) {
       issues.error(where, '"db_file_name" צריך להיות שם קובץ שמסתיים ב-.db.');
     }
-    final filesDir = str('files_dir') ?? 'files';
-    if (filesDir.contains('/') ||
-        filesDir.contains('\\') ||
-        filesDir.contains('..') ||
-        filesDir.contains(':')) {
-      issues.error(where, '"files_dir" צריך להיות שם תיקייה פשוט.');
-    }
     if (issues.hasErrors) throw BuildFailed(issues.all);
     return LibraryConfig(
       libraryId: id!,
@@ -180,7 +170,6 @@ class LibraryConfig {
       updatePublicKey: key,
       defaultGeneration: generation,
       dbFileName: dbFileName,
-      filesDir: filesDir,
       description: str('description'),
       author: str('author'),
     );

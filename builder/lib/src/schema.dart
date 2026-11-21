@@ -1,7 +1,7 @@
 /// DDL in the shape of the official seforim.db (schema 7), with two
 /// differences that personal databases allow: text stays in `line.content`
 /// (no `line_content` split, no zstd dictionary), and `book` carries the
-/// optional `fileType`/`filePath` columns for PDF/DOCX books.
+/// `fileType`/`filePath` columns of personal databases, always NULL here.
 const List<String> kSchema = [
   '''CREATE TABLE schema_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)''',
   '''CREATE TABLE category (

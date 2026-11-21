@@ -48,14 +48,11 @@ source/
 מצוה להדליק נרות שבת קודם השקיעה.
 ```
 
-### ספר קובץ — PDF, DOCX ועוד
+### רק ספרי טקסט
 
-`books/<קטגוריה>/<כותרת>.pdf` (וגם `docx`, `doc`, `rtf`, `odt`, `epub`, `md`, `html` ועוד, לפי מה שאוצריא פותחת).
-הבונה מעתיק את הקובץ ל-`<פלט>/zmanenu-files/<קטגוריה>/` ושומר `book.filePath` יחסי לתיקיית המסד, כנדרש.
-קישורים, מהדורות ודיבור המתחיל קיימים רק בספרי טקסט.
-
-> **שימו לב:** מנגנון העדכונים של אוצריא מעדכן רק את קובץ ה-`.db`. קובצי PDF/DOCX אינם מגיעים בעדכון.
-> ראו "שאלות פתוחות" בדוח ההקמה, ואת `zmanenu.zip` שבכל רילייס.
+המסד מכיל ספרי טקסט בלבד. קובץ שאינו טקסט בכל מקום בעץ המקור הוא שגיאה: ב-`books/` מותר רק `.txt`,
+ובשאר המקומות רק `.txt`, `.json`, `.csv` ו-`.md`. הקבצים `desktop.ini` ו-`Thumbs.db`, ש-Windows יוצר
+בתיקיות, אינם נקראים.
 
 ## `metadata.json` — פרטי ספר
 
@@ -233,7 +230,7 @@ source/
 | `update_manifest_url` | `https://github.com/Otzaria/zmanenu-library/releases/latest/download/manifest.json` |
 | `update_public_key` | המפתח הציבורי (ed25519, base64) |
 | `default_generation` | דור לספר שלא הוגדר לו דור |
-| `db_file_name`, `files_dir` | שם קובץ המסד ותיקיית קובצי ה-PDF/DOCX שלצידו |
+| `db_file_name` | שם קובץ המסד |
 | `description`, `author` | לידיעה |
 
 `db_version` אינו כתוב כאן: ה-workflow קובע אותו בכל רילייס (הגרסה האחרונה + 1).

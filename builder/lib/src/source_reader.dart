@@ -8,24 +8,18 @@ import 'issues.dart';
 import 'model.dart';
 import 'text_utils.dart';
 
-/// Document formats the app opens from `book.filePath` (DocumentFormat).
-const Set<String> kFileBookExtensions = {
-  'pdf',
-  'docx',
-  'docm',
-  'dotx',
-  'dotm',
-  'doc',
-  'dot',
-  'rtf',
-  'odt',
-  'epub',
-  'md',
-  'markdown',
-  'html',
-  'htm',
-  'xhtml',
-};
+/// Files that Windows and Explorer drop into folders; never part of the source.
+bool isIgnoredSystemFile(String name) {
+  final lower = name.toLowerCase();
+  return lower == 'desktop.ini' || lower == 'thumbs.db';
+}
+
+/// Extensions of the text files the source tree may hold. Anything else
+/// (PDF, DOCX, images...) is an error: the database holds text books only.
+const Set<String> kTextExtensions = {'txt', 'json', 'csv', 'md'};
+
+/// Top-level folders that have their own checks.
+const Set<String> _knownDirs = {'books', 'links', 'alt_toc', 'editions'};
 
 const Set<String> _metadataKeys = {
   'heShortDesc',
@@ -103,6 +97,7 @@ class _Reader {
       return;
     }
     _walk(booksDir, const []);
+    _scanOtherFiles(Directory(root));
     _readCategoriesJson();
     _readMetadata();
     _readLinks();
@@ -120,7 +115,7 @@ class _Reader {
       ..sort((a, b) => p.basename(a.path).compareTo(p.basename(b.path)));
     for (final entity in entries) {
       final name = p.basename(entity.path);
-      if (name.startsWith('.')) continue;
+      if (name.startsWith('.') || isIgnoredSystemFile(name)) continue;
       if (entity is Directory) {
         final childPath = [...path, name.trim()];
         if (name.trim() != name || name.trim().isEmpty) {
@@ -139,13 +134,13 @@ class _Reader {
   void _readBookFile(File file, List<String> categoryPath) {
     final rel = _rel(file.path);
     final name = p.basename(file.path);
-    if (name == 'README.md' || name == '.gitkeep') return;
+    if (name == 'README.md') return;
     final ext = p.extension(name).toLowerCase().replaceFirst('.', '');
     final title = p.basenameWithoutExtension(name).trim();
-    if (ext != 'txt' && !kFileBookExtensions.contains(ext)) {
+    if (ext != 'txt') {
       issues.error(
         rel,
-        'סוג קובץ לא נתמך ".$ext" (txt, או ${kFileBookExtensions.join(', ')}).',
+        'רק ספרי טקסט (.txt) נתמכים במסד הזה; קובץ ".$ext" אינו ספר טקסט.',
       );
       return;
     }
@@ -174,19 +169,35 @@ class _Reader {
       categoryPath: categoryPath,
       relPath: rel,
       absPath: file.path,
-      fileExt: ext == 'txt' ? null : ext,
     );
-    if (book.isText) {
-      _readLines(book, file);
-    } else {
-      final relInFiles = [...categoryPath, name].join('/');
-      book.storedFilePath = '${config.filesDir}/$relInFiles';
-    }
+    _readLines(book, file);
     book.topics = categoryPath.length <= 2
         ? categoryPath
         : categoryPath.sublist(categoryPath.length - 2);
     _byTitle[title] = book;
     out.books.add(book);
+  }
+
+  /// Files outside the folders that have their own checks: only text files.
+  void _scanOtherFiles(Directory dir) {
+    final entries = dir.listSync()..sort((a, b) => a.path.compareTo(b.path));
+    for (final entity in entries) {
+      final name = p.basename(entity.path);
+      if (name.startsWith('.') || isIgnoredSystemFile(name)) continue;
+      if (entity is Directory) {
+        if (dir.path == root && _knownDirs.contains(name)) continue;
+        _scanOtherFiles(entity);
+      } else if (entity is File) {
+        final ext = p.extension(name).toLowerCase().replaceFirst('.', '');
+        if (!kTextExtensions.contains(ext)) {
+          issues.error(
+            _rel(entity.path),
+            'קובץ שאינו טקסט ("$name"). במקור מותרים רק קובצי '
+            '${kTextExtensions.map((e) => '.$e').join(', ')}.',
+          );
+        }
+      }
+    }
   }
 
   void _readLines(BookSource book, File file) {
@@ -197,12 +208,16 @@ class _Reader {
       issues.error(book.relPath, 'הקובץ אינו UTF-8 תקין.');
       return;
     }
-    if (text.startsWith('﻿')) text = text.substring(1);
+    if (text.startsWith('\uFEFF')) text = text.substring(1);
     final lines = text
         .split('\n')
         .map((l) => l.endsWith('\r') ? l.substring(0, l.length - 1) : l)
         .toList();
     if (lines.isNotEmpty && lines.last.isEmpty) lines.removeLast();
+    if (text.contains('\u0000')) {
+      issues.error(book.relPath, 'קובץ בינארי, לא טקסט (יש בו תו NUL).');
+      return;
+    }
     if (lines.every((l) => l.trim().isEmpty)) {
       issues.error(book.relPath, 'קובץ ריק.');
       return;
@@ -230,7 +245,7 @@ class _Reader {
     if (!file.existsSync()) return null;
     try {
       var text = file.readAsStringSync();
-      if (text.startsWith('﻿')) text = text.substring(1);
+      if (text.startsWith('\uFEFF')) text = text.substring(1);
       if (text.trim().isEmpty) return null;
       return jsonDecode(text);
     } on FormatException catch (e) {
@@ -272,14 +287,10 @@ class _Reader {
     return null;
   }
 
-  BookSource? _book(String title, String where, {bool text = false}) {
+  BookSource? _book(String title, String where) {
     final book = _byTitle[title.trim()];
     if (book == null) {
       issues.error(where, 'אין ספר בשם "$title" בתיקיית books/.');
-      return null;
-    }
-    if (text && !book.isText) {
-      issues.error(where, '"$title" הוא קובץ ${book.fileExt}, לא ספר טקסט.');
       return null;
     }
     return book;
@@ -389,9 +400,6 @@ class _Reader {
       final dh = meta['dibburHamatchil'];
       if (dh is bool) {
         book.dibburHamatchil = dh;
-        if (dh && !book.isText) {
-          issues.error(at, '"dibburHamatchil" אפשרי רק בספר טקסט.');
-        }
       } else if (dh != null) {
         issues.error(at, '"dibburHamatchil" צריך להיות true/false.');
       }
@@ -446,7 +454,11 @@ class _Reader {
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final file in files) {
       final name = p.basename(file.path);
-      if (name.startsWith('.') || name == 'README.md') continue;
+      if (name.startsWith('.') ||
+          name == 'README.md' ||
+          isIgnoredSystemFile(name)) {
+        continue;
+      }
       final rel = _rel(file.path);
       if (!name.endsWith('_links.json')) {
         issues.error(
@@ -458,7 +470,6 @@ class _Reader {
       final source = _book(
         name.substring(0, name.length - '_links.json'.length),
         rel,
-        text: true,
       );
       final json = _json(rel);
       if (source == null || json == null) continue;
@@ -612,13 +623,6 @@ class _Reader {
       );
       return;
     }
-    if (!target.isText) {
-      issues.error(
-        at,
-        'ספר היעד "$targetTitle" הוא קובץ ${target.fileExt}; קישורים רק לספרי טקסט.',
-      );
-      return;
-    }
     final targetLine = _lineIndex(
       e['line_index_2'],
       target,
@@ -739,7 +743,11 @@ class _Reader {
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final file in files) {
       final name = p.basename(file.path);
-      if (name.startsWith('.') || name == 'README.md') continue;
+      if (name.startsWith('.') ||
+          name == 'README.md' ||
+          isIgnoredSystemFile(name)) {
+        continue;
+      }
       final rel = _rel(file.path);
       if (!name.endsWith('_alt_toc.json')) {
         issues.error(rel, 'שם קובץ צריך להיות "<כותרת הספר>_alt_toc.json".');
@@ -748,7 +756,6 @@ class _Reader {
       final book = _book(
         name.substring(0, name.length - '_alt_toc.json'.length),
         rel,
-        text: true,
       );
       final json = _json(rel);
       if (book == null || json == null) continue;
@@ -826,7 +833,7 @@ class _Reader {
     final file = File(p.join(root, where));
     if (!file.existsSync()) return;
     var text = file.readAsStringSync();
-    if (text.startsWith('﻿')) text = text.substring(1);
+    if (text.startsWith('\uFEFF')) text = text.substring(1);
     final rows = parseCsv(text);
     if (rows.isEmpty) return;
     final header = rows.first.map((h) => h.trim()).toList();
@@ -930,7 +937,7 @@ class _Reader {
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final bookDir in bookDirs) {
       final rel = _rel(bookDir.path);
-      final book = _book(p.basename(bookDir.path), rel, text: true);
+      final book = _book(p.basename(bookDir.path), rel);
       if (book == null) continue;
       final metaRel = '$rel/editions.json';
       final meta = _json(metaRel);
@@ -948,13 +955,22 @@ class _Reader {
         return const {};
       }
 
-      final files =
-          bookDir
-              .listSync()
-              .whereType<File>()
-              .where((f) => f.path.endsWith('.txt'))
-              .toList()
-            ..sort((a, b) => a.path.compareTo(b.path));
+      final files = <File>[];
+      for (final f in bookDir.listSync().whereType<File>()) {
+        final name = p.basename(f.path);
+        if (name.endsWith('.txt')) {
+          files.add(f);
+        } else if (name != 'editions.json' &&
+            name != 'README.md' &&
+            !name.startsWith('.') &&
+            !isIgnoredSystemFile(name)) {
+          issues.error(
+            _rel(f.path),
+            'בתיקיית מהדורות מותרים רק קובצי .txt ו-editions.json.',
+          );
+        }
+      }
+      files.sort((a, b) => a.path.compareTo(b.path));
       if (files.isEmpty) {
         issues.error(rel, 'אין קובצי מהדורה (.txt).');
         continue;
