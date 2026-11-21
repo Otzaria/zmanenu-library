@@ -35,3 +35,25 @@ class BuildFailed implements Exception {
   @override
   String toString() => issues.join('\n');
 }
+
+/// Where [offset] falls in [text], as "line L, column C" (both from 1).
+String textPosition(String text, int offset) {
+  var line = 1;
+  var column = 1;
+  for (var i = 0; i < offset && i < text.length; i++) {
+    if (text.codeUnitAt(i) == 0x0A) {
+      line++;
+      column = 1;
+    } else {
+      column++;
+    }
+  }
+  return 'שורה $line, עמודה $column';
+}
+
+/// The message of a JSON [FormatException], with the line and column.
+String jsonErrorMessage(FormatException e, String text) {
+  final offset = e.offset;
+  final at = offset == null ? '' : ' (${textPosition(text, offset)})';
+  return 'JSON לא תקין$at: ${e.message}';
+}

@@ -70,10 +70,12 @@ class LibraryConfig {
       throw BuildFailed(issues.all);
     }
     final Object? json;
+    String text = '';
     try {
-      json = jsonDecode(file.readAsStringSync());
+      text = utf8.decode(file.readAsBytesSync());
+      json = jsonDecode(text);
     } on FormatException catch (e) {
-      issues.error(where, 'JSON לא תקין: ${e.message}');
+      issues.error(where, jsonErrorMessage(e, text));
       throw BuildFailed(issues.all);
     }
     if (json is! Map<String, dynamic>) {

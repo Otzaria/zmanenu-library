@@ -65,7 +65,8 @@ const Set<String> _metadataKeys = {
 };
 
 /// Maps a connection type as written in Otzaria links files to the
-/// `connection_type.name` the app reads. Port of ConnectionType.fromString.
+/// `connection_type.name` the app reads (ConnectionType.fromString), or null
+/// for a missing or unknown type. `linker` is not a type an editor writes.
 String? connectionTypeName(String? raw) {
   final v = (raw ?? '').trim().toLowerCase().replaceAll(' ', '_');
   if (v.startsWith('quotation')) return 'QUOTATION';
@@ -91,10 +92,17 @@ String? connectionTypeName(String? raw) {
     'explication' => 'EXPLICATION',
     'law' => 'LAW',
     'summary' => 'SUMMARY',
-    'linker' => null,
-    _ => 'OTHER',
+    'other' => 'OTHER',
+    _ => null,
   };
 }
+
+/// The connection types an editor may write, for error messages.
+const String kLinkTypeNames =
+    'commentary, super commentary, targum, reference, source, midrash, '
+    'quotation, mesorat hashas, ein mishpat, dibur hamatchil, parshanut, '
+    'mishnah in talmud, related, footnotes, sifrei mitzvot, essay, allusion, '
+    'liturgy, elucidation, explication, law, summary, other';
 
 /// Reads and validates the source tree under [root]. Every problem is added
 /// to [issues]; the caller stops when [Issues.hasErrors].
@@ -273,22 +281,55 @@ class _Reader {
   Object? _json(String relPath) {
     final file = File(p.join(root, relPath));
     if (!file.existsSync()) return null;
+    String text;
     try {
-      var text = file.readAsStringSync();
-      if (text.startsWith('\uFEFF')) text = text.substring(1);
-      if (text.trim().isEmpty) return null;
-      return jsonDecode(text);
-    } on FormatException catch (e) {
-      issues.error(relPath, 'JSON לא תקין: ${e.message}');
+      text = utf8.decode(file.readAsBytesSync());
+    } on FormatException {
+      issues.error(relPath, 'הקובץ אינו UTF-8 תקין.');
       return null;
     }
+    if (text.startsWith('\uFEFF')) text = text.substring(1);
+    if (text.trim().isEmpty) return null;
+    try {
+      return jsonDecode(text);
+    } on FormatException catch (e) {
+      issues.error(relPath, jsonErrorMessage(e, text));
+      return null;
+    }
+  }
+
+  double? _num(Object? v, String where, String key) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    issues.error(where, '"$key" צריך להיות מספר, לא ${_typeName(v)}.');
+    return null;
+  }
+
+  static String _typeName(Object v) => switch (v) {
+    String() => 'מחרוזת',
+    bool() => 'true/false',
+    List() => 'רשימה',
+    Map() => 'אובייקט',
+    _ => v.runtimeType.toString(),
+  };
+
+  /// A hint for a title that matches no book: `"` and `'` against `״` and `׳`.
+  String _titleHint(String title) {
+    final hebrew = title.replaceAll('"', '״').replaceAll("'", '׳');
+    if (hebrew != title && _byTitle.containsKey(hebrew)) {
+      return ' האם התכוונתם ל"$hebrew"? בכותרות כותבים ״ ו-׳, גם במפתחות JSON.';
+    }
+    if (hebrew != title) {
+      return ' בכותרות כותבים ״ (גרשיים עבריים) ו-׳, לא " ו-\'.';
+    }
+    return '';
   }
 
   String? _str(Object? v, String where, String key) {
     if (v == null) return null;
     if (v is String) return v.trim().isEmpty ? null : v.trim();
     if (v is num) return v.toString();
-    issues.error(where, '"$key" צריך להיות מחרוזת.');
+    issues.error(where, '"$key" צריך להיות מחרוזת, לא ${_typeName(v)}.');
     return null;
   }
 
@@ -313,14 +354,20 @@ class _Reader {
   int? _int(Object? v, String where, String key) {
     if (v == null) return null;
     if (v is num && v == v.roundToDouble()) return v.toInt();
-    issues.error(where, '"$key" צריך להיות מספר שלם.');
+    issues.error(
+      where,
+      '"$key" צריך להיות מספר שלם, לא ${v is num ? 'שבר' : _typeName(v)}.',
+    );
     return null;
   }
 
   BookSource? _book(String title, String where) {
     final book = _byTitle[title.trim()];
     if (book == null) {
-      issues.error(where, 'אין ספר בשם "$title" בתיקיית books/.');
+      issues.error(
+        where,
+        'אין ספר בשם "$title" בתיקיית books/.${_titleHint(title.trim())}',
+      );
       return null;
     }
     return book;
@@ -402,7 +449,7 @@ class _Reader {
       if (order is num) {
         book.order = order.round();
       } else if (order != null) {
-        issues.error(at, '"order" צריך להיות מספר.');
+        issues.error(at, '"order" צריך להיות מספר, לא ${_typeName(order)}.');
       }
       book.pubDate = _str(meta['pubDate'], at, 'pubDate');
       book.pubPlace = _str(meta['pubPlace'], at, 'pubPlace');
@@ -551,7 +598,12 @@ class _Reader {
     }
     final type = connectionTypeName(rawType as String?);
     if (type == null) {
-      issues.error(at, 'סוג קישור "linker" אינו נתמך.');
+      issues.error(
+        at,
+        rawType == null || rawType.trim().isEmpty
+            ? 'חסר "Conection Type". לקישור כללי כתבו "other".'
+            : 'סוג קישור לא מוכר "$rawType". הסוגים המוכרים: $kLinkTypeNames.',
+      );
       return;
     }
     final bookField = _str(e['book_2'], at, 'book_2');
@@ -632,7 +684,8 @@ class _Reader {
     if (target == null) {
       issues.error(
         at,
-        'ספר היעד "$targetTitle" לא קיים במסד. לקישור לספרייה הרשמית הוסיפו "target_library": "official".',
+        'ספר היעד "$targetTitle" לא קיים במסד.${_titleHint(targetTitle)} '
+        'לקישור לספרייה הרשמית הוסיפו "target_library": "official".',
       );
       return;
     }
@@ -845,7 +898,13 @@ class _Reader {
     const where = 'versions.csv';
     final file = File(p.join(root, where));
     if (!file.existsSync()) return;
-    var text = file.readAsStringSync();
+    String text;
+    try {
+      text = utf8.decode(file.readAsBytesSync());
+    } on FormatException {
+      issues.error(where, 'הקובץ אינו UTF-8 תקין.');
+      return;
+    }
     if (text.startsWith('\uFEFF')) text = text.substring(1);
     final rows = parseCsv(text);
     if (rows.isEmpty) return;
@@ -1029,7 +1088,7 @@ class _Reader {
             source: _str(m['source'], metaRel, 'source'),
             license: _str(m['license'], metaRel, 'license'),
             notes: _str(m['notes'], metaRel, 'notes'),
-            priority: (m['priority'] as num?)?.toDouble(),
+            priority: _num(m['priority'], metaRel, 'priority'),
           ),
         );
       }
@@ -1047,7 +1106,7 @@ class _Reader {
           source: _str(base['source'], metaRel, 'source'),
           license: _str(base['license'], metaRel, 'license'),
           notes: _str(base['notes'], metaRel, 'notes'),
-          priority: (base['priority'] as num?)?.toDouble() ?? 100,
+          priority: _num(base['priority'], metaRel, 'priority') ?? 100,
         ),
       );
       out.editions.addAll(editions);

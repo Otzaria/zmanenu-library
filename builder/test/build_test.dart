@@ -31,20 +31,25 @@ BuildResult run(
   int version = 1,
   String? previous,
   String out = 'out',
+  String? library,
+  bool release = false,
+  bool allowRemovedBooks = false,
 }) => build(
   BuildOptions(
     sourceDir: source,
-    libraryJson: libraryJson,
+    libraryJson: library ?? libraryJson,
     outDir: p.join(temp.path, out),
     dbVersion: version,
     previousDb: previous,
+    release: release,
+    allowRemovedBooks: allowRemovedBooks,
   ),
 );
 
 /// The error messages of a build that must fail.
-List<String> errorsOf(String source) {
+List<String> errorsOf(String source, {BuildResult Function()? build}) {
   try {
-    run(source);
+    (build ?? () => run(source))();
   } on BuildFailed catch (e) {
     return [
       for (final i in e.issues.where((i) => i.isError))
@@ -196,6 +201,127 @@ void main() {
     });
   });
 
+  group('the previous database', () {
+    /// library.json with [changes] applied, written next to the sources.
+    String libraryWith(Map<String, Object?> changes) {
+      final json =
+          jsonDecode(File(libraryJson).readAsStringSync())
+              as Map<String, dynamic>;
+      json.addAll(changes);
+      final file = File(p.join(temp.path, 'library.json'))
+        ..writeAsStringSync(jsonEncode(json));
+      return file.path;
+    }
+
+    for (final (key, value) in [
+      ('library_id', 'otzaria.other'),
+      ('library_folder', 'תיקייה אחרת'),
+      ('update_manifest_url', 'https://example.com/manifest.json'),
+      ('update_public_key', base64.encode(List.filled(32, 7))),
+    ]) {
+      test('rejects a different $key', () {
+        final v1 = run(makeSource(), out: 'v1');
+        final errors = errorsOf(
+          '',
+          build: () => run(
+            p.join(temp.path, 'src'),
+            version: 2,
+            previous: v1.dbPath,
+            out: 'v2',
+            library: libraryWith({key: value}),
+          ),
+        ).join('\n');
+        expect(errors, contains('$key במסד הקודם'));
+      });
+    }
+
+    test('lists removed and added books', () {
+      final v1 = run(makeSource(), out: 'v1');
+      final src = p.join(temp.path, 'src');
+      File(p.join(src, 'books/קטגוריה/ספר א.txt')).deleteSync();
+      File(p.join(src, 'books/קטגוריה/ספר ג.txt')).writeAsStringSync('טקסט\n');
+      final v2 = run(src, version: 2, previous: v1.dbPath, out: 'v2');
+      final warnings = v2.warnings.join('\n');
+      expect(warnings, contains('1 ספרים שהיו במסד הקודם נעלמו: ספר א.'));
+      expect(warnings, contains('1 ספרים חדשים: ספר ג.'));
+    });
+
+    test('a removed book fails a release unless allowed', () {
+      final v1 = run(makeSource(), out: 'v1');
+      final src = p.join(temp.path, 'src');
+      File(p.join(src, 'books/קטגוריה/ספר א.txt')).deleteSync();
+      final errors = errorsOf(
+        '',
+        build: () =>
+            run(src, version: 2, previous: v1.dbPath, out: 'v2', release: true),
+      ).join('\n');
+      expect(errors, contains('allow_removed_books'));
+      final allowed = run(
+        src,
+        version: 2,
+        previous: v1.dbPath,
+        out: 'v3',
+        release: true,
+        allowRemovedBooks: true,
+      );
+      expect(allowed.warnings.join('\n'), contains('נעלמו: ספר א.'));
+    });
+
+    test('a rename with renamedFrom is not a removal', () {
+      final v1 = run(makeSource(), out: 'v1');
+      final src = p.join(temp.path, 'src');
+      File(
+        p.join(src, 'books/קטגוריה/ספר א.txt'),
+      ).renameSync(p.join(src, 'books/קטגוריה/ספר א מתוקן.txt'));
+      File(p.join(src, 'metadata.json')).writeAsStringSync(
+        jsonEncode({
+          'ספר א מתוקן': {
+            'renamedFrom': ['ספר א'],
+          },
+        }),
+      );
+      final v2 = run(
+        src,
+        version: 2,
+        previous: v1.dbPath,
+        out: 'v2',
+        release: true,
+      );
+      expect(v2.warnings.join('\n'), isNot(contains('נעלמו')));
+      // In the next release the old title is gone from the previous database.
+      final v3 = run(src, version: 3, previous: v2.dbPath, out: 'v3');
+      expect(v3.warnings.join('\n'), contains('כבר הוחל'));
+    });
+
+    test('renamedFrom that the previous database does not have', () {
+      final v1 = run(makeSource(), out: 'v1');
+      final src = p.join(temp.path, 'src');
+      File(p.join(src, 'books/קטגוריה/ספר ג.txt')).writeAsStringSync('טקסט\n');
+      File(p.join(src, 'metadata.json')).writeAsStringSync(
+        jsonEncode({
+          'ספר ג': {
+            'renamedFrom': ['אין כזה'],
+          },
+        }),
+      );
+      final errors = errorsOf(
+        '',
+        build: () => run(src, version: 2, previous: v1.dbPath, out: 'v2'),
+      ).join('\n');
+      expect(errors, contains('renamedFrom "אין כזה" לא קיים במסד הקודם'));
+    });
+  });
+
+  test('a release without books fails', () {
+    final root = Directory(p.join(temp.path, 'empty', 'books'))
+      ..createSync(recursive: true);
+    final errors = errorsOf(
+      '',
+      build: () => run(root.parent.path, release: true),
+    ).join('\n');
+    expect(errors, contains('אין אף ספר'));
+  });
+
   group('source errors', () {
     void expectError(Map<String, String> files, String fragment) {
       final errors = errorsOf(makeSource(files: files));
@@ -247,7 +373,12 @@ void main() {
     test('external link without a reference', () {
       expectError({
         'links/ספר א_links.json': jsonEncode([
-          {'line_index_1': 2, 'book_2': 'בראשית', 'target_library': 'official'},
+          {
+            'line_index_1': 2,
+            'book_2': 'בראשית',
+            'target_library': 'official',
+            'Conection Type': 'source',
+          },
         ]),
       }, 'heRef_2');
     });
@@ -358,6 +489,75 @@ void main() {
       expect(errors, contains('מפתח לא מוכר "kind"'));
     });
 
+    test('unknown and missing link types', () {
+      final errors = errorsOf(
+        makeSource(
+          files: {
+            'links/ספר א_links.json': jsonEncode([
+              {
+                'line_index_1': 2,
+                'line_index_2': 2,
+                'book_2': 'ספר ב',
+                'Conection Type': 'comentary',
+              },
+              {'line_index_1': 3, 'line_index_2': 2, 'book_2': 'ספר ב'},
+            ]),
+          },
+        ),
+      ).join('\n');
+      expect(errors, contains('סוג קישור לא מוכר "comentary"'));
+      expect(errors, contains('חסר "Conection Type"'));
+    });
+
+    test('broken JSON reports the line and the column', () {
+      expectError({
+        'metadata.json': '{\n  "ספר א": {\n    "order": 1,\n  }\n}\n',
+      }, 'metadata.json: JSON לא תקין (שורה 4, עמודה 3)');
+    });
+
+    test('a value of the wrong type is an error, not a crash', () {
+      final errors = errorsOf(
+        makeSource(
+          files: {
+            'metadata.json': jsonEncode({
+              'ספר א': {'order': '1', 'heShortDesc': true},
+            }),
+            'editions/ספר א/מנוקד.txt': '<h1>ספר א</h1>\nשורה\nשורה\n',
+            'editions/ספר א/editions.json': jsonEncode({
+              'מנוקד': {'priority': 'high'},
+            }),
+            'categories.json': jsonEncode({
+              'קטגוריה': {'order': 1.5},
+            }),
+          },
+        ),
+      ).join('\n');
+      expect(errors, contains('"order" צריך להיות מספר, לא מחרוזת'));
+      expect(
+        errors,
+        contains('"heShortDesc" צריך להיות מחרוזת, לא true/false'),
+      );
+      expect(errors, contains('"priority" צריך להיות מספר, לא מחרוזת'));
+      expect(errors, contains('"order" צריך להיות מספר שלם, לא שבר'));
+    });
+
+    test('a title with " suggests ״', () {
+      final errors = errorsOf(
+        makeSource(
+          files: {
+            'books/תנ״ך/ספר ג.txt': 'טקסט\n',
+            'books/תנ״ך/פירוש ג״ה.txt': 'טקסט\n',
+            'metadata.json': jsonEncode({
+              'פירוש ג"ה': {'order': 1},
+              'פירוש ד"ה': {'order': 1},
+            }),
+          },
+        ),
+      ).join('\n');
+      expect(errors, contains('האם התכוונתם ל"פירוש ג״ה"'));
+      expect(errors, contains('בכותרות כותבים ״ (גרשיים עבריים)'));
+    });
+
     test('a book that is not a text file', () {
       expectError({'books/קטגוריה/מאמר.pdf': '%PDF'}, 'רק ספרי טקסט');
     });
@@ -448,8 +648,10 @@ void main() {
     test('connection types follow the official mapping', () {
       expect(connectionTypeName('Commentary'), 'COMMENTARY');
       expect(connectionTypeName('related passage'), 'RELATED');
-      expect(connectionTypeName(null), 'OTHER');
+      expect(connectionTypeName('other'), 'OTHER');
+      expect(connectionTypeName(null), isNull);
       expect(connectionTypeName('linker'), isNull);
+      expect(connectionTypeName('comentary'), isNull);
     });
 
     test('csv with quotes', () {

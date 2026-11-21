@@ -24,6 +24,8 @@ class BuildOptions {
     this.previousDb,
     this.officialDb,
     this.manifestUrlOverride,
+    this.release = false,
+    this.allowRemovedBooks = false,
   });
 
   final String sourceDir;
@@ -39,6 +41,11 @@ class BuildOptions {
   /// Optional official seforim.db, to check that external link targets exist.
   final String? officialDb;
   final String? manifestUrlOverride;
+
+  /// A build to publish: it must hold books, and a book of [previousDb] that
+  /// is gone without `renamedFrom` is an error unless [allowRemovedBooks].
+  final bool release;
+  final bool allowRemovedBooks;
 }
 
 class BuildResult {
@@ -62,7 +69,13 @@ BuildResult build(BuildOptions options) {
   if (options.officialDb != null) {
     _checkOfficialTargets(source, options.officialDb!, issues);
   }
-  if (!issues.hasErrors) _assignIds(source, options.previousDb, config, issues);
+  if (options.release && source.books.isEmpty && !issues.hasErrors) {
+    issues.error('books/', 'אין אף ספר: אי אפשר להוציא גרסה ריקה.');
+  }
+  final manifestUrl = options.manifestUrlOverride ?? config.updateManifestUrl;
+  if (!issues.hasErrors) {
+    _assignIds(source, options, config, manifestUrl, issues);
+  }
   if (issues.hasErrors) throw BuildFailed(issues.all);
 
   Directory(options.outDir).createSync(recursive: true);
@@ -72,7 +85,6 @@ BuildResult build(BuildOptions options) {
     if (f.existsSync()) f.deleteSync();
   }
 
-  final manifestUrl = options.manifestUrlOverride ?? config.updateManifestUrl;
   _write(dbPath, config, source, options.dbVersion, manifestUrl);
   return BuildResult(
     dbPath,
@@ -120,10 +132,12 @@ void _checkOfficialTargets(
 /// plugin bookUid), so they are carried over from the previous release.
 void _assignIds(
   LibrarySource source,
-  String? previousDb,
+  BuildOptions options,
   LibraryConfig config,
+  String? manifestUrl,
   Issues issues,
 ) {
+  final previousDb = options.previousDb;
   final previous = <String, int>{};
   var next = 1;
   if (previousDb != null) {
@@ -131,28 +145,43 @@ void _assignIds(
       issues.error('--previous-db', 'הקובץ $previousDb לא קיים.');
       return;
     }
+    final Map<String, String> meta;
     final db = sqlite3.open(previousDb, mode: OpenMode.readOnly);
     try {
-      final meta = {
+      meta = {
         for (final row in db.select('SELECT key, value FROM schema_meta'))
           row['key'] as String: row['value'] as String,
       };
-      if (meta['library_id'] != config.libraryId) {
-        issues.error(
-          '--previous-db',
-          'library_id במסד הקודם הוא "${meta['library_id']}", לא "${config.libraryId}".',
-        );
-        return;
-      }
       for (final row in db.select('SELECT id, title FROM book')) {
         previous[row['title'] as String] = row['id'] as int;
         if ((row['id'] as int) >= next) next = (row['id'] as int) + 1;
       }
-      final stored = int.tryParse(meta[kNextBookIdKey] ?? '');
-      if (stored != null && stored > next) next = stored;
+    } on SqliteException catch (e) {
+      issues.error('--previous-db', 'לא מסד תקין ($previousDb): ${e.message}');
+      return;
     } finally {
       db.close();
     }
+    // Installed copies pin these values; a change cuts every user off.
+    final pinned = {
+      'library_id': config.libraryId,
+      'library_folder': config.libraryFolder,
+      'update_manifest_url': manifestUrl,
+      'update_public_key': config.updatePublicKey,
+    };
+    pinned.forEach((key, value) {
+      if (meta[key] != value) {
+        issues.error(
+          '--previous-db',
+          '$key במסד הקודם הוא "${meta[key] ?? ''}", והבנייה הזו כותבת '
+              '"${value ?? ''}". הערך נעוץ אצל המשתמשים ואסור לשנות אותו.',
+        );
+      }
+    });
+    if (issues.hasErrors) return;
+    final stored = int.tryParse(meta[kNextBookIdKey] ?? '');
+    if (stored != null && stored > next) next = stored;
+    _compareTitles(source, previous, options, issues);
   }
   final used = <int, BookSource>{};
   final fresh = <BookSource>[];
@@ -180,6 +209,67 @@ void _assignIds(
     book.id = next++;
   }
   source.nextBookId = next;
+}
+
+/// Reports books that appeared or disappeared since [previous], and checks
+/// every `renamedFrom` against it.
+void _compareTitles(
+  LibrarySource source,
+  Map<String, int> previous,
+  BuildOptions options,
+  Issues issues,
+) {
+  final current = {for (final b in source.books) b.title};
+  final renamed = <String>{};
+  for (final book in source.books) {
+    for (final old in book.renamedFrom) {
+      if (previous.containsKey(old)) {
+        renamed.add(old);
+      } else if (previous.containsKey(book.title)) {
+        issues.warn(
+          'metadata.json: "${book.title}"',
+          'renamedFrom "$old" כבר הוחל בגרסה קודמת (הכותרת "${book.title}" '
+              'קיימת במסד הקודם). אפשר להסיר אותו.',
+        );
+      } else {
+        issues.error(
+          'metadata.json: "${book.title}"',
+          'renamedFrom "$old" לא קיים במסד הקודם, ולכן לא נשמר שום מזהה. '
+              'בדקו את הכתיב (״ ולא ").',
+        );
+      }
+    }
+  }
+  final removed = [
+    for (final title in previous.keys)
+      if (!current.contains(title) && !renamed.contains(title)) title,
+  ]..sort();
+  final added = [
+    for (final book in source.books)
+      if (!previous.containsKey(book.title) &&
+          !book.renamedFrom.any(previous.containsKey))
+        book.title,
+  ]..sort();
+  if (removed.isNotEmpty) {
+    final message =
+        '${removed.length} ספרים שהיו במסד הקודם נעלמו: ${removed.join(', ')}. '
+        'בשינוי שם הוסיפו renamedFrom, אחרת הסימניות וההיסטוריה של המשתמשים על '
+        'הספר אובדות.';
+    if (options.release && !options.allowRemovedBooks) {
+      issues.error(
+        '--previous-db',
+        '$message להסרה מכוונת הריצו את Release עם allow_removed_books.',
+      );
+    } else {
+      issues.warn('--previous-db', message);
+    }
+  }
+  if (added.isNotEmpty) {
+    issues.warn(
+      '--previous-db',
+      '${added.length} ספרים חדשים: ${added.join(', ')}.',
+    );
+  }
 }
 
 void _write(

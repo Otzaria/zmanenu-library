@@ -58,10 +58,15 @@ dart run bin/zmanenu.dart build --source ../examples --out ../dist-examples --db
 ```
 
 - `--library` ברירת מחדל: `library.json` שליד תיקיית המקור.
-- `--previous-db <old.db>` שומר את מזהי הספרים מגרסה קודמת. ה-workflow עושה זאת לבד.
+- `--previous-db <old.db>` שומר את מזהי הספרים מגרסה קודמת. ה-workflow עושה זאת לבד. הבנייה נכשלת אם
+  `library_id`, `library_folder`, `update_manifest_url` או `update_public_key` שונים מאלה שבמסד הקודם, ומדפיסה
+  אילו ספרים נוספו ואילו נעלמו.
+- `--release`: בנייה לפרסום. מסד בלי ספרים, או ספר שנעלם מהמסד הקודם בלי `renamedFrom`, הם שגיאה.
+  `--allow-removed-books` מתיר הסרה מכוונת.
 - `--official-db <seforim.db>` בודק שכל קישור ל`official` מצביע על ספר שקיים בספרייה הרשמית.
 
 כל שגיאה מודפסת עם הקובץ והרשומה, למשל `שגיאה: links/X_links.json [3]: ספר היעד "Y" לא קיים במסד`.
+ב-JSON שבור מודפסים גם מספר השורה והעמודה.
 כשיש שגיאה, לא נכתב מסד.
 
 הפלט: `dist/zmanenu.db`. כדי לנסות באוצריא: הגדרות ← ספרייה ← "מסדי ספרים אישיים" ← הוספת הקובץ.
