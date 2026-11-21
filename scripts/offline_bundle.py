@@ -13,10 +13,10 @@ release without the network:
 The tar is deterministic: entries sorted by name, fixed mtime, owner 0, mode
 0644, UTF-8 (PAX) names.
 
-When the archive is larger than one GitHub release asset may be, it is split
-the way the official library splits it (tool/release/split_release_asset.sh in
-the app): <archive>.part-000, -001 ... of 1992294400 bytes and
-<archive>.manifest.json listing them.
+The archive is always published in parts, like the official library (the app's
+download assistant finds an asset by its part-000), even below the limit:
+<archive>.part-000, -001 ... of up to 1992294400 bytes, and
+<archive>.manifest.json in the format of tool/release/split_release_asset.sh.
 
   offline_bundle.py pack --db zmanenu.db --manifest manifest.json --out-dir DIR [--zstd zstd]
 """
@@ -165,9 +165,9 @@ def pack(db, manifest_path, out_dir, zstd):
 
     os.makedirs(out_dir, exist_ok=True)
     archive = os.path.join(out_dir, ARCHIVE)
-    for stale in [archive, archive + '.manifest.json']:
-        if os.path.exists(stale):
-            os.remove(stale)
+    for name in os.listdir(out_dir):
+        if name.startswith(ARCHIVE):
+            os.remove(os.path.join(out_dir, name))
     with tempfile.TemporaryDirectory(dir=out_dir) as work:
         tar_path = os.path.join(work, 'zmanenu-offline.tar')
         write_tar(tar_path, db, manifest_bytes, sig_bytes)
@@ -175,11 +175,29 @@ def pack(db, manifest_path, out_dir, zstd):
     check_archive(archive, zstd, os.path.basename(db), full, manifest_bytes, sig_bytes)
 
     size = os.path.getsize(archive)
-    if size > PART_SIZE:
-        parts = split(archive, out_dir)
-        print(f'{ARCHIVE}: {size} bytes in {len(parts)} parts, see {ARCHIVE}.manifest.json')
-    else:
-        print(f'{archive}: {size} bytes, {os.path.basename(db)} sha256 {full["sha256"]}')
+    parts = split(archive, out_dir)
+    check_parts(out_dir)
+    print(f'{ARCHIVE}: {size} bytes in {len(parts)} part(s), see {ARCHIVE}.manifest.json')
+
+
+def check_parts(out_dir):
+    """Reassembles the parts as assemble_split_asset.sh does and checks every sha256."""
+    with open(os.path.join(out_dir, f'{ARCHIVE}.manifest.json'), encoding='utf-8') as f:
+        manifest = json.load(f)
+    whole = hashlib.sha256()
+    total = 0
+    for part in manifest['parts']:
+        path = os.path.join(out_dir, part['name'])
+        if sha256_of(path) != part['sha256'] or os.path.getsize(path) != part['size']:
+            fail(f'{part["name"]} does not match {ARCHIVE}.manifest.json')
+        if part['size'] >= GITHUB_LIMIT:
+            fail(f'{part["name"]} is over the GitHub asset limit')
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(1 << 20), b''):
+                whole.update(chunk)
+                total += len(chunk)
+    if whole.hexdigest() != manifest['sha256'] or total != manifest['size']:
+        fail(f'the parts do not add up to {ARCHIVE}')
 
 
 def main():

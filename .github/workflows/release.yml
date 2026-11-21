@@ -292,7 +292,7 @@ jobs:
           if str(m['db_version']) != sys.argv[2]:
               sys.exit(f"manifest db_version {m['db_version']} != release v{sys.argv[2]}")
           PY
-          # zmanenu-offline.tar.zst, or its parts + manifest when over the GitHub asset limit.
+          # Always in parts + manifest, like the official library bundle.
           python3 scripts/offline_bundle.py pack --db "$work/$db" \
             --manifest "$work/release/manifest.json" --out-dir "$work/release"
           mkdir -p "$RUNNER_TEMP/publish"

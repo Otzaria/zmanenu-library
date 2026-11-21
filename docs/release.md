@@ -33,7 +33,7 @@ https://github.com/Otzaria/zmanenu-library/releases/download/v<db_version>/manif
 | `manifest.json`, `manifest.json.sig` | המניפסט והחתימה עליו (ed25519, base64 ושורה חדשה) |
 | `otzaria.zmanenu-<N>.db.zst` (או חלקים שלו) | המסד המלא, דחוס ב-zstd |
 | `otzaria.zmanenu-<N>.db.from-<M>.patch.zst` | תיקוני דלתא מגרסאות קודמות |
-| `zmanenu-offline.tar.zst` (או חלקים ומניפסט) | חבילת האופליין, ראו בהמשך |
+| `zmanenu-offline.tar.zst.part-NNN`, `zmanenu-offline.tar.zst.manifest.json` | חבילת האופליין, ראו בהמשך |
 
 ### חבילת האופליין — `zmanenu-offline.tar.zst`
 
@@ -57,12 +57,16 @@ https://github.com/Otzaria/zmanenu-library/releases/download/v<db_version>/manif
 - נבנה ב-[`scripts/offline_bundle.py`](../scripts/offline_bundle.py), שמחלץ אותו שוב בסוף ובודק את הרשומות,
   את ה-sha ואת הזהות בבתים של המניפסט והחתימה.
 
-**מעל 2GB:** GitHub אינו מקבל קובץ רילייס של 2GiB ומעלה. כשהחבילה גדולה מ-1992294400 בתים, היא מפוצלת
-במוסכמה של הספרייה הרשמית (`tool/release/split_release_asset.sh` באפליקציה): החלקים
-`zmanenu-offline.tar.zst.part-000`, `part-001` וכן הלאה, וקובץ `zmanenu-offline.tar.zst.manifest.json` עם
-`schemaVersion`, `archive`, `size`, `sha256`, `partSizeLimit`, `githubAssetLimit` ו-`parts` (`name`, `size`,
-`sha256`). משרשרים את החלקים לפי הסדר, למשל עם `assemble_split_asset.sh`, ובודקים את ה-sha256 של הארכיון.
-מתחת לסף מתפרסם קובץ יחיד בלי מניפסט חלקים.
+**תמיד בחלקים:** כמו בספרייה הרשמית, החבילה מתפרסמת תמיד בחלקים, גם כשהיא קטנה, כדי שמסייע ההורדה והייבוא
+באפליקציה יעבדו באותה צורה (הם מזהים את הנכס לפי `part-000`). המוסכמה היא של `tool/release/split_release_asset.sh`
+באפליקציה:
+
+- `zmanenu-offline.tar.zst.part-000`, `part-001` וכן הלאה, כל אחד עד 1992294400 בתים (מתחת למגבלת 2GiB של GitHub).
+- `zmanenu-offline.tar.zst.manifest.json`, עם `schemaVersion`, `archive`, `size`, `sha256`, `partSizeLimit`,
+  `githubAssetLimit` ו-`parts` (`name`, `size`, `sha256`).
+
+משרשרים את החלקים לפי הסדר, למשל עם `assemble_split_asset.sh`, ובודקים את ה-sha256 של הארכיון. הסקריפט מחבר
+את החלקים בעצמו אחרי הפיצול ובודק את כל ה-sha256.
 
 ## ה-workflow ‏Release
 
