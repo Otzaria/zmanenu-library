@@ -6,9 +6,10 @@ artifact of the newest `--deltas` releases (always at least the latest one,
 whose book ids the new build must keep), checks each against the sha256 in its
 manifest, and writes to $GITHUB_OUTPUT:
 
-  db_version   the version to build
-  previous_db  the latest published database ('' before the first release)
-  delta_from   space-separated databases for `pack --delta-from`
+  db_version      the version to build; the release is tagged v<db_version>
+  previous_db     the latest published database ('' before the first release)
+  delta_from      space-separated databases for `pack --delta-from`
+  delta_versions  their versions, space-separated (file name: v<N>.db in --out)
 
   release_plan.py --repo OWNER/REPO --out DIR --deltas N [--db-version N]
 """
@@ -87,11 +88,14 @@ def main():
     a = ap.parse_args()
     if not 0 <= a.deltas <= 4:
         sys.exit('--deltas must be between 0 and 4 (the limit of pack --delta-from)')
+    raw = a.db_version.strip()
+    if raw and not re.fullmatch(r'[1-9][0-9]{0,8}', raw):
+        sys.exit(f'db_version "{raw}" is not a positive whole number')
     os.makedirs(a.out, exist_ok=True)
 
     versions = published_versions(a.repo)
     latest = versions[0] if versions else 0
-    version = int(a.db_version) if a.db_version.strip() else latest + 1
+    version = int(raw) if raw else latest + 1
     if version <= latest:
         sys.exit(f'db_version {version} must be greater than the latest release ({latest})')
 
@@ -102,7 +106,8 @@ def main():
 
     print(f'db_version={version} latest={latest} deltas={[f"v{v}" for v in versions[:a.deltas]]}')
     out = os.environ.get('GITHUB_OUTPUT')
-    lines = [f'db_version={version}', f'previous_db={previous}', f'delta_from={" ".join(deltas)}']
+    lines = [f'db_version={version}', f'previous_db={previous}', f'delta_from={" ".join(deltas)}',
+             f'delta_versions={" ".join(str(v) for v in versions[:a.deltas])}']
     if out:
         with open(out, 'a', encoding='utf-8') as f:
             f.write('\n'.join(lines) + '\n')

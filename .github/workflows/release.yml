@@ -1,5 +1,9 @@
-# הוצאת גרסה: בנייה, אימות, אריזה עם דלתות, חתימה, אימות החתימה ופרסום רילייס.
-# הפעלה ידנית בלבד. דורש את ה-secret ZMANENU_SIGNING_KEY (ראו README).
+# הוצאת גרסה: בנייה, אימות, אריזה עם דלתות, חתימה, אימות החתימה, חבילת אופליין ופרסום.
+# ידנית בלבד, ורק מ-main. ארבעה jobs, כדי שכל אחד יקבל רק את מה שהוא צריך:
+#   build   (contents: read)  בונה, מאמת ואורז, בלי המפתח.
+#   sign    (environment release)  חותם בכלי המינימלי signer/, בלי קוד האפליקציה.
+#   verify  (contents: read)  מאמת בקוד האפליקציה עם המפתח הציבורי בלבד, ובונה את חבילת האופליין.
+#   publish (contents: write)  מעלה את הקבצים המאומתים ומפרסם את הרילייס v<db_version>.
 name: Release
 
 on:
@@ -17,42 +21,80 @@ on:
         description: db_version ידני (ריק = הגרסה האחרונה + 1)
         required: false
         default: ''
+      allow_removed_books:
+        description: לאשר ספרים שנעלמו מהגרסה הקודמת בלי renamedFrom
+        type: boolean
+        required: false
+        default: false
       otzaria_ref:
-        description: Otzaria/otzaria ref לכלים (ריק = otzaria-tools.ref)
+        description: Otzaria/otzaria commit SHA מלא לכלים (ריק = otzaria-tools.ref)
         required: false
         default: ''
       manifest_url_override:
-        description: לריפו בדיקה בלבד — כתובת מניפסט אחרת. לעולם לא בריפו האמיתי.
+        description: לריפו בדיקה בלבד — כתובת מניפסט אחרת. אסור בריפו האמיתי.
         required: false
         default: ''
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      GH_TOKEN: ${{ github.token }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      db_version: ${{ steps.plan.outputs.db_version }}
+      delta_versions: ${{ steps.plan.outputs.delta_versions }}
+      otzaria_ref: ${{ steps.inputs.outputs.otzaria_ref }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Check the update source
-        id: source
+      - name: Check the inputs and the update source
+        id: inputs
         env:
-          HAS_SIGNING_KEY: ${{ secrets.ZMANENU_SIGNING_KEY != '' }}
+          REPO: ${{ github.repository }}
+          DB_VERSION: ${{ inputs.db_version }}
+          DELTA_COUNT: ${{ inputs.delta_count }}
+          OTZARIA_REF: ${{ inputs.otzaria_ref }}
+          OVERRIDE: ${{ inputs.manifest_url_override }}
         run: |
+          if [ -n "$DB_VERSION" ] && ! [[ "$DB_VERSION" =~ ^[1-9][0-9]{0,8}$ ]]; then
+            echo "::error::db_version \"$DB_VERSION\" is not a positive whole number."
+            exit 1
+          fi
+          if ! [[ "$DELTA_COUNT" =~ ^[0-4]$ ]]; then
+            echo "::error::delta_count \"$DELTA_COUNT\" must be a number from 0 to 4."
+            exit 1
+          fi
+          ref="$OTZARIA_REF"
+          [ -n "$ref" ] || ref="$(tr -d '[:space:]' < otzaria-tools.ref)"
+          if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::otzaria_ref \"$ref\" is not a full 40-character commit SHA (branches, tags and PR refs are not allowed)."
+            exit 1
+          fi
+          echo "otzaria_ref=$ref" >> "$GITHUB_OUTPUT"
+
           declared="$(python3 -c 'import json; print(json.load(open("library.json"))["update_manifest_url"])')"
-          expected="https://github.com/${{ github.repository }}/releases/latest/download/manifest.json"
-          override="${{ inputs.manifest_url_override }}"
-          if [ -n "$override" ]; then
-            echo "::warning::manifest_url_override=$override — a test release, not for users."
-            url="$override"
+          expected="https://github.com/$REPO/releases/latest/download/manifest.json"
+          if [ -n "$OVERRIDE" ]; then
+            if [ "$REPO" = "Otzaria/zmanenu-library" ]; then
+              echo "::error::manifest_url_override is for a test repository only, never for Otzaria/zmanenu-library."
+              exit 1
+            fi
+            if ! [[ "$OVERRIDE" =~ ^https://[^[:space:]]+$ ]]; then
+              echo "::error::manifest_url_override must be an https URL."
+              exit 1
+            fi
+            echo "::warning::manifest_url_override=$OVERRIDE — a test release, not for users."
+            url="$OVERRIDE"
           elif [ "$declared" != "$expected" ]; then
             echo "::error::library.json declares $declared but this repository publishes to $expected. The URL is pinned in every installed copy and must never change."
             exit 1
@@ -60,15 +102,12 @@ jobs:
             url="$declared"
           fi
           echo "manifest_url=$url" >> "$GITHUB_OUTPUT"
-          if [ "$HAS_SIGNING_KEY" != "true" ]; then
-            echo "::error::secret ZMANENU_SIGNING_KEY is not set."
-            exit 1
-          fi
 
       - id: tools
         uses: ./.github/actions/setup-tools
         with:
-          otzaria-ref: ${{ inputs.otzaria_ref }}
+          otzaria-ref: ${{ steps.inputs.outputs.otzaria_ref }}
+          require-sha: 'true'
 
       - name: Builder tests
         working-directory: builder
@@ -76,78 +115,263 @@ jobs:
 
       - name: Plan the version and fetch previous releases
         id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DB_VERSION: ${{ inputs.db_version }}
+          DELTA_COUNT: ${{ inputs.delta_count }}
         run: |
-          python3 scripts/release_plan.py --repo "${{ github.repository }}" \
-            --out "$RUNNER_TEMP/previous" --deltas "${{ inputs.delta_count }}" \
-            --db-version "${{ inputs.db_version }}"
+          python3 scripts/release_plan.py --repo "$REPO" --out "$RUNNER_TEMP/unsigned/previous" \
+            --deltas "$DELTA_COUNT" --db-version "$DB_VERSION"
 
       - name: Build
         id: build
+        env:
+          VERSION: ${{ steps.plan.outputs.db_version }}
+          PREVIOUS: ${{ steps.plan.outputs.previous_db }}
+          MANIFEST_URL: ${{ steps.inputs.outputs.manifest_url }}
+          ALLOW_REMOVED: ${{ inputs.allow_removed_books }}
         run: |
           out="$RUNNER_TEMP/dist"
-          previous="${{ steps.plan.outputs.previous_db }}"
+          flags=(--release)
+          [ "$ALLOW_REMOVED" = true ] && flags+=(--allow-removed-books)
+          [ -n "$PREVIOUS" ] && flags+=(--previous-db "$PREVIOUS")
           cd builder
           dart run bin/zmanenu.dart build --source ../source --library ../library.json \
-            --out "$out" --db-version "${{ steps.plan.outputs.db_version }}" \
-            --manifest-url "${{ steps.source.outputs.manifest_url }}" \
-            ${previous:+--previous-db "$previous"}
+            --out "$out" --db-version "$VERSION" --manifest-url "$MANIFEST_URL" "${flags[@]}"
           db="$(python3 -c 'import json; print(json.load(open("../library.json"))["db_file_name"])')"
           echo "db=$out/$db" >> "$GITHUB_OUTPUT"
-          echo "dist=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Check the size of the offline package
+        env:
+          DB: ${{ steps.build.outputs.db }}
+        run: python3 scripts/offline_bundle.py check-size --db "$DB"
 
       - name: Validate
         env:
           OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
-        run: bash scripts/otzaria-tools.sh validate "${{ steps.build.outputs.db }}"
+          DB: ${{ steps.build.outputs.db }}
+        run: bash scripts/otzaria-tools.sh validate "$DB"
 
       - name: Pack (full + deltas)
         env:
           OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.plan.outputs.db_version }}
+          DB: ${{ steps.build.outputs.db }}
+          DELTA_FROM: ${{ steps.plan.outputs.delta_from }}
           NOTES: ${{ inputs.release_notes }}
         run: |
-          version="${{ steps.plan.outputs.db_version }}"
-          rel="$RUNNER_TEMP/release"
-          rm -rf "$rel" && mkdir -p "$rel"
-          printf '%s\n' "${NOTES:-גרסה $version}" > "$RUNNER_TEMP/notes.txt"
+          work="$RUNNER_TEMP/unsigned"
+          rm -rf "$work/release" && mkdir -p "$work/release"
+          printf '%s\n' "${NOTES:-גרסה $VERSION}" > "$work/notes.txt"
           args=()
-          for old in ${{ steps.plan.outputs.delta_from }}; do args+=(--delta-from "$old"); done
-          bash scripts/otzaria-tools.sh update pack "${{ steps.build.outputs.db }}" \
-            --out "$rel" \
-            --url-prefix "https://github.com/${{ github.repository }}/releases/download/v$version" \
-            --notes "$RUNNER_TEMP/notes.txt" "${args[@]}"
+          for old in $DELTA_FROM; do args+=(--delta-from "$old"); done
+          bash scripts/otzaria-tools.sh update pack "$DB" --out "$work/release" \
+            --url-prefix "https://github.com/$REPO/releases/download/v$VERSION" \
+            --notes "$work/notes.txt" "${args[@]}"
+          cp "$DB" "$work/"
+          cp "$work/release/manifest.json" "$RUNNER_TEMP/manifest.json"
 
-      - name: Sign
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned
+          path: ${{ runner.temp }}/unsigned
+          retention-days: 1
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: manifest
+          path: ${{ runner.temp }}/manifest.json
+          retention-days: 1
+          if-no-files-found: error
+
+  sign:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The approvers and the ZMANENU_SIGNING_KEY secret live in this environment.
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Cone mode also checks out the files at the root (library.json).
+          sparse-checkout: signer
+
+      - uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
+        with:
+          sdk: 3.13.5
+
+      - name: Resolve the signer
+        working-directory: signer
+        run: dart pub get --enforce-lockfile
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: manifest
+          path: ${{ runner.temp }}/sign
+
+      - name: Check the signing key
         env:
-          OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
           SIGNING_KEY: ${{ secrets.ZMANENU_SIGNING_KEY }}
         run: |
-          key="$RUNNER_TEMP/signing.key"
-          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
-          trap 'rm -f "$key"' EXIT
-          bash scripts/otzaria-tools.sh update sign "$RUNNER_TEMP/release/manifest.json" --key "$key"
+          # Checked here, before any tool sees it, so that no error can print it.
+          key="$(printf '%s' "$SIGNING_KEY" | tr -d '\r\n')"
+          if ! [[ "$key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+            echo "::error::secret ZMANENU_SIGNING_KEY is missing or is not a 32-byte base64 key."
+            exit 1
+          fi
 
-      - name: Verify signature, parts and deltas
+      - name: Sign
+        working-directory: signer
+        env:
+          ZMANENU_SIGNING_KEY: ${{ secrets.ZMANENU_SIGNING_KEY }}
+          VERSION: ${{ needs.build.outputs.db_version }}
+        run: |
+          read -r pub id < <(python3 -c 'import json; d = json.load(open("../library.json")); print(d["update_public_key"], d["library_id"])')
+          dart run bin/sign.dart "$RUNNER_TEMP/sign/manifest.json" \
+            --public-key "$pub" --library-id "$id" --db-version "$VERSION"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signature
+          path: ${{ runner.temp }}/sign/manifest.json.sig
+          retention-days: 1
+          if-no-files-found: error
+
+  verify:
+    needs: [build, sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: tools
+        uses: ./.github/actions/setup-tools
+        with:
+          otzaria-ref: ${{ needs.build.outputs.otzaria_ref }}
+          require-sha: 'true'
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned
+          path: ${{ runner.temp }}/unsigned
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signature
+          path: ${{ runner.temp }}/unsigned/release
+
+      - name: Verify signature, parts and deltas with the app's code
         env:
           OTZARIA_DIR: ${{ steps.tools.outputs.otzaria-dir }}
+          DELTA_VERSIONS: ${{ needs.build.outputs.delta_versions }}
         run: |
+          work="$RUNNER_TEMP/unsigned"
+          db="$(python3 -c 'import json; print(json.load(open("library.json"))["db_file_name"])')"
           args=()
-          for old in ${{ steps.plan.outputs.delta_from }}; do args+=(--delta-from "$old"); done
-          bash scripts/otzaria-tools.sh update verify "$RUNNER_TEMP/release/manifest.json" \
-            --db "${{ steps.build.outputs.db }}" --parts "$RUNNER_TEMP/release" \
+          for v in $DELTA_VERSIONS; do args+=(--delta-from "$work/previous/v$v.db"); done
+          # --db: the public key and library_id come from the built database (library.json).
+          bash scripts/otzaria-tools.sh update verify "$work/release/manifest.json" \
+            --db "$work/$db" --parts "$work/release" \
             --zstd-lib "$(ldconfig -p | awk '/libzstd\.so\.1 / {print $NF; exit}')" "${args[@]}"
 
-      - name: First-install bundle
+      - name: Offline package
+        env:
+          VERSION: ${{ needs.build.outputs.db_version }}
         run: |
-          cd "${{ steps.build.outputs.dist }}"
-          zip -qr "$RUNNER_TEMP/release/zmanenu.zip" .
+          work="$RUNNER_TEMP/unsigned"
+          db="$(python3 -c 'import json; print(json.load(open("library.json"))["db_file_name"])')"
+          python3 - "$work/release/manifest.json" "$VERSION" <<'PY'
+          import json, sys
+          m = json.load(open(sys.argv[1], encoding='utf-8'))
+          if str(m['db_version']) != sys.argv[2]:
+              sys.exit(f"manifest db_version {m['db_version']} != release v{sys.argv[2]}")
+          PY
+          python3 scripts/offline_bundle.py pack --db "$work/$db" \
+            --manifest "$work/release/manifest.json" --out "$work/release/zmanenu-offline.zip"
+          mkdir -p "$RUNNER_TEMP/publish"
+          mv "$work/release" "$RUNNER_TEMP/publish/release"
+          mv "$work/notes.txt" "$RUNNER_TEMP/publish/notes.txt"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: ${{ runner.temp }}/publish
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: [build, verify]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: ${{ runner.temp }}/publish
 
       - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.db_version }}
+          SHA: ${{ github.sha }}
         run: |
-          version="${{ steps.plan.outputs.db_version }}"
-          tag="v$version"
+          set -euo pipefail
+          tag="v$VERSION"
+          dir="$RUNNER_TEMP/publish"
+          [[ "$VERSION" =~ ^[1-9][0-9]*$ ]] || { echo "::error::bad version $VERSION"; exit 1; }
+
+          # A draft left by a failed run is deleted; a published release is never touched.
+          while IFS=$'\t' read -r id draft; do
+            [ -n "$id" ] || continue
+            if [ "$draft" = true ]; then
+              echo "Deleting the leftover draft $id of $tag"
+              gh api -X DELETE "repos/$REPO/releases/$id"
+            else
+              echo "::error::$tag is already published. Releases are never replaced."
+              exit 1
+            fi
+          done < <(gh api --paginate "repos/$REPO/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$tag\") | [(.id | tostring), (.draft | tostring)] | @tsv")
+
           # Draft first: "latest" moves only after every asset is uploaded.
-          gh release create "$tag" --repo "${{ github.repository }}" --draft \
-            --target "${{ github.sha }}" --title "מחברי זמננו $tag" \
-            --notes-file "$RUNNER_TEMP/notes.txt" "$RUNNER_TEMP"/release/*
-          gh release edit "$tag" --repo "${{ github.repository }}" --draft=false --latest
-          echo "Published $tag: https://github.com/${{ github.repository }}/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+          id="$(gh api -X POST "repos/$REPO/releases" -f tag_name="$tag" \
+            -f target_commitish="$SHA" -f name="מחברי זמננו $tag" \
+            -F body=@"$dir/notes.txt" -F draft=true --jq .id)"
+          count=0
+          for f in "$dir"/release/*; do
+            name="$(basename "$f")"
+            gh api -X POST "https://uploads.github.com/repos/$REPO/releases/$id/assets?name=$name" \
+              -H 'Content-Type: application/octet-stream' --input "$f" --jq .name > /dev/null
+            count=$((count + 1))
+          done
+          uploaded="$(gh api "repos/$REPO/releases/$id/assets?per_page=100" --paginate --jq '.[].name' | wc -l)"
+          if [ "$uploaded" -ne "$count" ]; then
+            echo "::error::uploaded $uploaded of $count assets to the draft $id"
+            exit 1
+          fi
+          gh api -X PATCH "repos/$REPO/releases/$id" -F draft=false -f make_latest=true --jq .html_url
+
+          # The manifest of every version stays at this fixed address.
+          url="https://github.com/$REPO/releases/download/$tag/manifest.json"
+          curl -fsSL -o /dev/null "$url"
+          curl -fsSL -o /dev/null "$url.sig"
+          {
+            echo "Published $tag: https://github.com/$REPO/releases/tag/$tag"
+            echo
+            echo "Manifest: $url"
+          } >> "$GITHUB_STEP_SUMMARY"
