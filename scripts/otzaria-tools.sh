@@ -18,6 +18,16 @@ set -euo pipefail
 : "${OTZARIA_DIR:?set OTZARIA_DIR to a checkout of Otzaria/otzaria}"
 runner="${OTZARIA_UPDATE_RUNNER:-flutter-test}"
 
+# On Windows, `python3` may be the Microsoft Store stub that only prints a hint.
+python=""
+for candidate in python3 python; do
+  if command -v "$candidate" > /dev/null 2>&1 &&
+    "$candidate" -c 'import json, sys' > /dev/null 2>&1; then
+    python="$candidate"
+    break
+  fi
+done
+
 command="${1:-}"
 shift || true
 
@@ -32,7 +42,12 @@ case "$command" in
       dart run tool/personal_db_update.dart "$@"
       exit $?
     fi
+    if [ -z "$python" ]; then
+      echo "python3 or python is needed to pass the arguments" >&2
+      exit 1
+    fi
     runner_test="test/zz_zmanenu_tool_runner_test.dart"
+    trap 'rm -f "$OTZARIA_DIR/$runner_test"' EXIT
     cat > "$runner_test" <<'DART'
 import 'dart:convert';
 import 'dart:io';
@@ -53,7 +68,7 @@ void main() {
   }, timeout: const Timeout(Duration(minutes: 60)));
 }
 DART
-    OTZ_TOOL_ARGS="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@")" \
+    OTZ_TOOL_ARGS="$("$python" -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@")" \
       flutter test "$runner_test" --reporter expanded
     ;;
   *)
