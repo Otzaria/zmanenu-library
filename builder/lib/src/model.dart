@@ -213,4 +213,9 @@ class LibrarySource {
 
   /// Stored in schema_meta so ids of deleted books are never reused.
   int nextBookId = 1;
+
+  /// Category ids of the previous release by path ([CategoryNode.key]): the app
+  /// keys hidden books and per-book settings by category id.
+  final Map<String, int> previousCategoryIds = {};
+  int nextCategoryId = 1;
 }

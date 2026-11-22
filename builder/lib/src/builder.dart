@@ -14,6 +14,7 @@ import 'text_utils.dart';
 /// schema_meta key that remembers the next free book id, so the id of a
 /// deleted book is never given to a new one.
 const String kNextBookIdKey = 'zmanenu_next_book_id';
+const String kNextCategoryIdKey = 'zmanenu_next_category_id';
 
 class BuildOptions {
   BuildOptions({
@@ -152,6 +153,7 @@ void _assignIds(
         for (final row in db.select('SELECT key, value FROM schema_meta'))
           row['key'] as String: row['value'] as String,
       };
+      _readCategoryIds(db, source);
       for (final row in db.select('SELECT id, title FROM book')) {
         previous[row['title'] as String] = row['id'] as int;
         if ((row['id'] as int) >= next) next = (row['id'] as int) + 1;
@@ -181,6 +183,10 @@ void _assignIds(
     if (issues.hasErrors) return;
     final stored = int.tryParse(meta[kNextBookIdKey] ?? '');
     if (stored != null && stored > next) next = stored;
+    final storedCategory = int.tryParse(meta[kNextCategoryIdKey] ?? '');
+    if (storedCategory != null && storedCategory > source.nextCategoryId) {
+      source.nextCategoryId = storedCategory;
+    }
     _compareTitles(source, previous, options, issues);
   }
   final used = <int, BookSource>{};
@@ -209,6 +215,26 @@ void _assignIds(
     book.id = next++;
   }
   source.nextBookId = next;
+}
+
+void _readCategoryIds(Database db, LibrarySource source) {
+  final rows = {
+    for (final row in db.select('SELECT id, parentId, title FROM category'))
+      row['id'] as int: (row['parentId'] as int?, row['title'] as String),
+  };
+  for (final id in rows.keys) {
+    final path = <String>[];
+    final seen = <int>{};
+    int? current = id;
+    while (current != null && seen.add(current)) {
+      final row = rows[current];
+      if (row == null) break;
+      path.insert(0, row.$2);
+      current = row.$1;
+    }
+    source.previousCategoryIds[path.join('/')] = id;
+    if (id >= source.nextCategoryId) source.nextCategoryId = id + 1;
+  }
 }
 
 /// Reports books that appeared or disappeared since [previous], and checks
@@ -364,6 +390,7 @@ class _Writer {
       'description': config.description,
       'author': config.author,
       kNextBookIdKey: '${source.nextBookId}',
+      kNextCategoryIdKey: '${source.nextCategoryId}',
     };
     meta.forEach((k, v) {
       if (v != null) {
@@ -378,9 +405,10 @@ class _Writer {
   void _categories() {
     final nodes = [...source.categories]
       ..sort((a, b) => a.key.compareTo(b.key));
-    var id = 0;
+    // Kept from the previous release; a new category gets a fresh id, never a
+    // deleted one's.
     for (final node in nodes) {
-      node.id = ++id;
+      node.id = source.previousCategoryIds[node.key] ?? source.nextCategoryId++;
       _categoryIds[node.key] = node.id;
     }
     for (final node in nodes) {

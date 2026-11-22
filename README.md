@@ -62,7 +62,7 @@ dart run bin/zmanenu.dart build --source ../examples --out ../dist-examples --db
 ```
 
 - `--library` ברירת מחדל: `library.json` שליד תיקיית המקור.
-- `--previous-db <old.db>` שומר את מזהי הספרים מגרסה קודמת. ה-workflow עושה זאת לבד. הבנייה נכשלת אם
+- `--previous-db <old.db>` שומר את מזהי הספרים והקטגוריות מגרסה קודמת. ה-workflow עושה זאת לבד. הבנייה נכשלת אם
   `library_id`, `library_folder`, `update_manifest_url` או `update_public_key` שונים מאלה שבמסד הקודם, ומדפיסה
   אילו ספרים נוספו ואילו נעלמו.
 - `--release`: בנייה לפרסום. מסד בלי ספרים, או ספר שנעלם מהמסד הקודם בלי `renamedFrom`, הם שגיאה.

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
@@ -198,6 +199,28 @@ void main() {
       );
       final v2 = run(src, version: 2, previous: v1.dbPath, out: 'v2');
       expect(_ids(v2.dbPath)['ספר א מתוקן'], _ids(v1.dbPath)['ספר א']);
+    });
+  });
+
+  group('category ids', () {
+    test('are kept from the previous database, new ones never reuse ids', () {
+      final v1 = run(
+        makeSource(files: {'books/תת/ספר ג.txt': 'טקסט\n'}),
+        out: 'v1',
+      );
+      final ids1 = _categoryIds(v1.dbPath);
+      final src = p.join(temp.path, 'src');
+      Directory(p.join(src, 'books/תת')).deleteSync(recursive: true);
+      // Sorts before every existing category.
+      File(p.join(src, 'books/אאא/ספר ד.txt'))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('טקסט\n');
+      final v2 = run(src, version: 2, previous: v1.dbPath, out: 'v2');
+      final ids2 = _categoryIds(v2.dbPath);
+      expect(ids2['קטגוריה'], ids1['קטגוריה']);
+      expect(ids2['אאא'], greaterThan(ids1.values.reduce(max)));
+      final v3 = run(src, version: 3, previous: v2.dbPath, out: 'v3');
+      expect(_categoryIds(v3.dbPath), ids2);
     });
   });
 
@@ -668,6 +691,18 @@ Map<String, int> _ids(String dbPath) {
   try {
     return {
       for (final r in db.select('SELECT id, title FROM book'))
+        r['title'] as String: r['id'] as int,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+Map<String, int> _categoryIds(String dbPath) {
+  final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
+  try {
+    return {
+      for (final r in db.select('SELECT id, title FROM category'))
         r['title'] as String: r['id'] as int,
     };
   } finally {
