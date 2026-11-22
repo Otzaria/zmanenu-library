@@ -111,7 +111,7 @@ Actions ← **Release** ← Run workflow, **מהענף `main` בלבד**. הרצ
 וכל checkout נעשה עם `persist-credentials: false`.
 
 ה-workflow **Check** רץ על כל push, ועל PR מ-fork (PR מענף בתוך הריפו כבר נבדק ב-push שלו). הוא מריץ את בדיקות
-הבונה, `dart analyze` של הבונה ושל `signer/`, בנייה של `source/` ושל `examples/`, ו-`validate_personal_db`. הוא
+הבונה, `dart analyze` של הבונה ושל `signer/`, בנייה של `source/` ושל הדוגמה (`builder/test/fixtures/examples/`), ו-`validate_personal_db`. הוא
 אינו מפרסם.
 
 ## הגדרות בגיטהאב (פעם אחת)

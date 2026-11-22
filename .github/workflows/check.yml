@@ -53,10 +53,8 @@ jobs:
           cd builder
           dart run bin/zmanenu.dart build --source ../source --library ../library.json \
             --out "$RUNNER_TEMP/library" --db-version 1
-          if [ -d ../examples ]; then
-            dart run bin/zmanenu.dart build --source ../examples --library ../library.json \
-              --out "$RUNNER_TEMP/examples" --db-version 1
-          fi
+          dart run bin/zmanenu.dart build --source test/fixtures/examples --library ../library.json \
+            --out "$RUNNER_TEMP/examples" --db-version 1
 
       - name: Validate with the Otzaria validator
         env:
@@ -64,5 +62,5 @@ jobs:
         run: |
           db="$(python3 -c 'import json; print(json.load(open("library.json"))["db_file_name"])')"
           dbs=("$RUNNER_TEMP/library/$db")
-          [ -f "$RUNNER_TEMP/examples/$db" ] && dbs+=("$RUNNER_TEMP/examples/$db")
+          dbs+=("$RUNNER_TEMP/examples/$db")
           bash scripts/otzaria-tools.sh validate "${dbs[@]}"

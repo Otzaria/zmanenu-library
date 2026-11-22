@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 import 'package:zmanenu_builder/zmanenu_builder.dart';
 
 final String libraryJson = p.join('..', 'library.json');
-final String examples = p.join('..', 'examples');
+final String examples = p.join('test', 'fixtures', 'examples');
 
 late Directory temp;
 
@@ -64,109 +64,105 @@ void main() {
   setUp(() => temp = Directory.systemTemp.createTempSync('zmanenu_test'));
   tearDown(() => temp.deleteSync(recursive: true));
 
-  group(
-    'examples',
-    skip: Directory(examples).existsSync() ? false : 'examples/ was removed',
-    () {
-      test('build into a database with every table filled', () {
-        final result = run(examples);
-        final db = sqlite3.open(result.dbPath, mode: OpenMode.readOnly);
-        addTearDown(db.close);
-        int count(String table) =>
-            db.select('SELECT COUNT(*) AS c FROM $table').first['c'] as int;
-        final meta = {
-          for (final r in db.select('SELECT key, value FROM schema_meta'))
-            r['key']: r['value'],
-        };
-        expect(meta['library_id'], 'otzaria.zmanenu');
-        expect(meta['library_folder'], 'מחברי זמננו');
-        expect(meta['db_version'], '1');
-        for (final table in [
-          'book',
-          'category',
-          'line',
-          'tocEntry',
-          'line_toc',
-          'link',
-          'link_anchor',
-          'link_range',
-          'link_coverage',
-          'external_link',
-          'external_default_commentator',
-          'alt_toc_entry',
-          'line_alt_toc',
-          'book_version',
-          'version_line',
-          'book_version_link',
-          'default_commentator',
-          'default_targum',
-          'book_acronym',
-          'line_dh',
-          'line_ref',
-          'book_generation',
-          'book_author',
-        ]) {
-          expect(count(table), greaterThan(0), reason: table);
-        }
-        expect(
-          count('book WHERE fileType IS NOT NULL OR filePath IS NOT NULL'),
-          0,
-        );
-        expect(db.select('PRAGMA journal_mode').first.values.first, 'delete');
-        final external = db.select(
-          'SELECT targetSource, targetTitle, kind, position, b.title AS title '
-          'FROM external_default_commentator e '
-          'JOIN book b ON b.id = e.commentatorBookId',
-        );
-        expect(external.map((r) => r.values).toList(), [
-          ['official', 'בראשית', 'commentator', 0, 'הערות על בראשית לדוגמה'],
-        ]);
-      });
+  group('examples', () {
+    test('build into a database with every table filled', () {
+      final result = run(examples);
+      final db = sqlite3.open(result.dbPath, mode: OpenMode.readOnly);
+      addTearDown(db.close);
+      int count(String table) =>
+          db.select('SELECT COUNT(*) AS c FROM $table').first['c'] as int;
+      final meta = {
+        for (final r in db.select('SELECT key, value FROM schema_meta'))
+          r['key']: r['value'],
+      };
+      expect(meta['library_id'], 'otzaria.zmanenu');
+      expect(meta['library_folder'], 'מחברי זמננו');
+      expect(meta['db_version'], '1');
+      for (final table in [
+        'book',
+        'category',
+        'line',
+        'tocEntry',
+        'line_toc',
+        'link',
+        'link_anchor',
+        'link_range',
+        'link_coverage',
+        'external_link',
+        'external_default_commentator',
+        'alt_toc_entry',
+        'line_alt_toc',
+        'book_version',
+        'version_line',
+        'book_version_link',
+        'default_commentator',
+        'default_targum',
+        'book_acronym',
+        'line_dh',
+        'line_ref',
+        'book_generation',
+        'book_author',
+      ]) {
+        expect(count(table), greaterThan(0), reason: table);
+      }
+      expect(
+        count('book WHERE fileType IS NOT NULL OR filePath IS NOT NULL'),
+        0,
+      );
+      expect(db.select('PRAGMA journal_mode').first.values.first, 'delete');
+      final external = db.select(
+        'SELECT targetSource, targetTitle, kind, position, b.title AS title '
+        'FROM external_default_commentator e '
+        'JOIN book b ON b.id = e.commentatorBookId',
+      );
+      expect(external.map((r) => r.values).toList(), [
+        ['official', 'בראשית', 'commentator', 0, 'הערות על בראשית לדוגמה'],
+      ]);
+    });
 
-      test('every table the app knows exists, even when empty', () {
-        final db = sqlite3.open(run(examples).dbPath, mode: OpenMode.readOnly);
-        addTearDown(db.close);
-        final tables = {
-          for (final r in db.select(
-            "SELECT name FROM sqlite_master WHERE type = 'table'",
-          ))
-            r['name'] as String,
-        };
-        expect(
-          tables,
-          containsAll(kAppKnownTables.difference(kOmittedTables.keys.toSet())),
-        );
-        expect(tables, contains('external_default_commentator'));
-        for (final omitted in kOmittedTables.keys) {
-          expect(tables, isNot(contains(omitted)));
-        }
-      });
+    test('every table the app knows exists, even when empty', () {
+      final db = sqlite3.open(run(examples).dbPath, mode: OpenMode.readOnly);
+      addTearDown(db.close);
+      final tables = {
+        for (final r in db.select(
+          "SELECT name FROM sqlite_master WHERE type = 'table'",
+        ))
+          r['name'] as String,
+      };
+      expect(
+        tables,
+        containsAll(kAppKnownTables.difference(kOmittedTables.keys.toSet())),
+      );
+      expect(tables, contains('external_default_commentator'));
+      for (final omitted in kOmittedTables.keys) {
+        expect(tables, isNot(contains(omitted)));
+      }
+    });
 
-      test('a SOURCE link is stored as COMMENTARY from the base book', () {
-        final db = sqlite3.open(run(examples).dbPath, mode: OpenMode.readOnly);
-        addTearDown(db.close);
-        final rows = db.select(
-          'SELECT s.title AS s, t.title AS t FROM link l JOIN book s ON s.id = l.sourceBookId '
-          'JOIN book t ON t.id = l.targetBookId JOIN connection_type c ON c.id = l.connectionTypeId '
-          "WHERE c.name = 'COMMENTARY'",
-        );
-        expect(rows.map((r) => r['s']).toSet(), {'קיצור הלכות שבת לדוגמה'});
-        expect(rows.map((r) => r['t']).toSet(), {
-          'ביאור על קיצור הלכות שבת לדוגמה',
-        });
+    test('a SOURCE link is stored as COMMENTARY from the base book', () {
+      final db = sqlite3.open(run(examples).dbPath, mode: OpenMode.readOnly);
+      addTearDown(db.close);
+      final rows = db.select(
+        'SELECT s.title AS s, t.title AS t FROM link l JOIN book s ON s.id = l.sourceBookId '
+        'JOIN book t ON t.id = l.targetBookId JOIN connection_type c ON c.id = l.connectionTypeId '
+        "WHERE c.name = 'COMMENTARY'",
+      );
+      expect(rows.map((r) => r['s']).toSet(), {'קיצור הלכות שבת לדוגמה'});
+      expect(rows.map((r) => r['t']).toSet(), {
+        'ביאור על קיצור הלכות שבת לדוגמה',
       });
+    });
 
-      test('two builds of the same source are byte-identical', () {
-        final a = File(run(examples, out: 'a').dbPath).readAsBytesSync();
-        final b = File(run(examples, out: 'b').dbPath).readAsBytesSync();
-        expect(a, b);
-      });
+    test('two builds of the same source are byte-identical', () {
+      final a = File(run(examples, out: 'a').dbPath).readAsBytesSync();
+      final b = File(run(examples, out: 'b').dbPath).readAsBytesSync();
+      expect(a, b);
+    });
 
-      test('the empty source tree builds', () {
-        expect(run(p.join('..', 'source')).source.books, isEmpty);
-      });
-    },
-  );
+    test('the empty source tree builds', () {
+      expect(run(p.join('..', 'source')).source.books, isEmpty);
+    });
+  });
 
   group('book ids', () {
     test('are kept from the previous database, new books get fresh ids', () {

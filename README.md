@@ -9,7 +9,7 @@
 |---|---|
 | זהות המסד (`library_id`, שם, תיקייה, כתובת עדכונים, מפתח ציבורי) | [`library.json`](library.json) |
 | מקור הספרים האמיתי (מתחיל ריק) | [`source/`](source) |
-| דוגמה מלאה לכל יכולת | [`examples/`](examples) — אפשר למחוק |
+| דוגמה מלאה לכל יכולת (משמשת את הבדיקות) | [`builder/test/fixtures/examples/`](builder/test/fixtures/examples) |
 | מדריך הפורמט המלא | [`docs/format.md`](docs/format.md) |
 | הוצאת גרסה, מפתח וסוד | [`docs/release.md`](docs/release.md) |
 | הבונה (Dart) ובדיקותיו | [`builder/`](builder) |
@@ -47,7 +47,7 @@
 - **קישור** (פירוש, תרגום, הפניה, וגם לספר בספרייה הרשמית): `source/links/<כותרת>_links.json`.
 - **גרסה של ספר אחר:** שורה ב-`source/versions.csv`. **מהדורה** (נוסח חלופי שורה מול שורה): `source/editions/<כותרת>/`.
 
-כל סוג נתון מתועד עם דוגמה ב-[`docs/format.md`](docs/format.md), ויש לו קובץ חי מקביל ב-`examples/`.
+כל סוג נתון מתועד עם דוגמה ב-[`docs/format.md`](docs/format.md), ויש לו קובץ חי מקביל ב-[`builder/test/fixtures/examples/`](builder/test/fixtures/examples).
 
 ## בנייה מקומית
 
@@ -58,7 +58,7 @@ cd builder
 dart pub get
 dart test                                   # בדיקות הבונה
 dart run bin/zmanenu.dart build --source ../source   --out ../dist --db-version 1
-dart run bin/zmanenu.dart build --source ../examples --out ../dist-examples --db-version 1
+dart run bin/zmanenu.dart build --source test/fixtures/examples --out ../dist-examples --db-version 1
 ```
 
 - `--library` ברירת מחדל: `library.json` שליד תיקיית המקור.
@@ -89,15 +89,14 @@ Actions ← **Release** ← Run workflow, **מהענף `main` בלבד**: מענ
 מאמת את החתימה בקוד האפליקציה, בונה את חבילת האופליין `zmanenu-offline.tar.zst` ומפרסם רילייס `v<db_version>`.
 פירוט מלא, כולל הגדרת ה-environment והסוד: [`docs/release.md`](docs/release.md).
 
-ה-workflow **Check** רץ על כל push ועל PR מ-fork: בדיקות, בנייה של `source/` ושל `examples/`, ואימות. הוא אינו מפרסם.
+ה-workflow **Check** רץ על כל push ועל PR מ-fork: בדיקות, בנייה של `source/` ושל הדוגמה, ואימות. הוא אינו מפרסם.
 
 ## לפני ההפצה הראשונה
 
-1. מחקו את `examples/`, או השאירו אותה. היא נבנית רק ב-Check ואינה נכנסת לרילייס.
-2. הכניסו ספרים ל-`source/`.
-3. הגדירו את ה-environment ‏`release` עם מאשרים ואת הסוד `ZMANENU_SIGNING_KEY` בתוכו
+1. הכניסו ספרים ל-`source/`.
+2. הגדירו את ה-environment ‏`release` עם מאשרים ואת הסוד `ZMANENU_SIGNING_KEY` בתוכו
    ([`docs/release.md`](docs/release.md#הגדרות-בגיטהאב-פעם-אחת)).
-4. הריצו Release.
+3. הריצו Release.
 
 ## רישיון
 
